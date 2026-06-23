@@ -11,13 +11,14 @@ import {
   Pause,
   Play,
   RotateCcw,
+  Shield,
   Sparkles,
   Timer,
   Zap,
   type LucideIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Game, type GameDebugStats, type GameStats } from "@/lib/game/Game";
+import { Game, type AIDifficulty, type GameDebugStats, type GameStats } from "@/lib/game/Game";
 import { PixiGameCanvas } from "@/components/PixiGameCanvas";
 
 const initialStats: GameStats = {
@@ -31,11 +32,25 @@ const initialStats: GameStats = {
   playerCoverage: 0,
   shockwaveCharge: 100,
   shockwaveReady: true,
+  shieldReady: false,
+  shieldCooldown: 12,
+  shieldCooldownRemaining: 0,
+  shieldActive: false,
+  shieldTimer: 0,
+  playerLevel: 1,
+  playerXp: 0,
+  playerNextLevelXp: 80,
+  playerHealth: 120,
+  playerMaxHealth: 120,
+  playerShield: 40,
+  playerMaxShield: 40,
+  playerRespawnTimer: 0,
   nodePlayerCount: 0,
   nodeEnemyCount: 0,
   enemyMode: "expand",
   enemyCount: 0,
   enemyTypes: "none",
+  aiDifficulty: "medium",
   level: 1,
   maxLevel: 6,
   levelName: "First Cleanse",
@@ -68,8 +83,10 @@ function formatTime(seconds: number) {
   return `${minutes}:${remainingSeconds}`;
 }
 
-function formatMetricMs(value: number) {
-  return `${value.toFixed(1)}ms`;
+function formatMetricMs(value?: number) {
+  const safeValue = typeof value === "number" && Number.isFinite(value) ? value : 0;
+
+  return `${safeValue.toFixed(1)}ms`;
 }
 
 function toneStyles(tone: MetricCardProps["tone"]) {
@@ -161,6 +178,13 @@ export default function GameCanvas() {
         return;
       }
 
+      if ((event.key === "e" || event.key === "E") && !event.repeat) {
+        event.preventDefault();
+        gameRef.current?.activateShield();
+        syncStats();
+        return;
+      }
+
       if (event.code !== "Space" || event.repeat) {
         return;
       }
@@ -190,6 +214,19 @@ export default function GameCanvas() {
     syncStats();
   }, [syncStats]);
 
+  const activateShield = useCallback(() => {
+    gameRef.current?.activateShield();
+    syncStats();
+  }, [syncStats]);
+
+  const changeDifficulty = useCallback(
+    (difficulty: AIDifficulty) => {
+      gameRef.current?.setDifficulty(difficulty);
+      syncStats();
+    },
+    [syncStats],
+  );
+
   const changeLevel = useCallback(
     (delta: number) => {
       gameRef.current?.setLevel(stats.level + delta);
@@ -199,7 +236,6 @@ export default function GameCanvas() {
   );
 
   const infectionPercent = Math.round(stats.infectionLevel);
-  const coveragePercent = Math.round(stats.playerCoverage);
   const statusLabel =
     stats.status === "won"
       ? "Field secured"
@@ -213,6 +249,20 @@ export default function GameCanvas() {
   const shockwaveLabel = stats.shockwaveReady
     ? "Shockwave ready"
     : `Shockwave ${Math.round(stats.shockwaveCharge)} percent charged`;
+  const shieldLabel =
+    stats.level < 3
+      ? "Shield unlocks at level 3"
+      : stats.shieldActive
+        ? `Shield active ${stats.shieldTimer.toFixed(0)} seconds`
+        : stats.shieldReady
+          ? "Shield ready"
+          : `Shield ${Math.max(0, stats.shieldCooldownRemaining).toFixed(0)} seconds`;
+  const playerHealthPercent = Math.round((stats.playerHealth / Math.max(1, stats.playerMaxHealth)) * 100);
+  const playerShieldPercent = Math.round((stats.playerShield / Math.max(1, stats.playerMaxShield)) * 100);
+  const playerXpLabel =
+    Number.isFinite(stats.playerNextLevelXp) && stats.playerLevel < 5
+      ? `${stats.playerXp}/${stats.playerNextLevelXp}`
+      : "MAX";
   const enemySummary =
     stats.enemyCount > 0
       ? `Enemy ${stats.enemyMode} - ${stats.enemyTypes} - Nodes ${stats.nodePlayerCount}-${stats.nodeEnemyCount}`
@@ -242,7 +292,7 @@ export default function GameCanvas() {
           </h1>
         </div>
 
-        <div className="hidden min-w-[880px] grid-cols-[1fr_1fr_1fr_1.35fr_auto_auto] gap-3 lg:grid">
+        <div className="hidden min-w-[980px] grid-cols-[1fr_1fr_1fr_1.35fr_auto_auto_auto] gap-3 lg:grid">
           <MetricCard
             icon={CircleDot}
             label="Infected"
@@ -269,6 +319,23 @@ export default function GameCanvas() {
             <div className="mt-1 text-xs font-medium uppercase text-slate-400">
               {enemySummary}
             </div>
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <div className="grid flex-1 grid-cols-3 gap-1 text-[11px] font-semibold uppercase text-slate-400">
+                <span>L{stats.playerLevel}</span>
+                <span>HP {playerHealthPercent}%</span>
+                <span>SH {playerShieldPercent}%</span>
+              </div>
+              <select
+                aria-label="AI difficulty"
+                className="pointer-events-auto h-7 rounded-full border border-slate-200 bg-white/75 px-2 text-xs font-semibold uppercase text-slate-500 outline-none transition focus:border-[#1eaee9] focus:ring-2 focus:ring-[#1eaee9]/20"
+                onChange={(event) => changeDifficulty(event.target.value as AIDifficulty)}
+                value={stats.aiDifficulty}
+              >
+                <option value="easy">Easy AI</option>
+                <option value="medium">Medium AI</option>
+                <option value="hard">Hard AI</option>
+              </select>
+            </div>
             <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-100">
               <div
                 className="h-full rounded-full bg-gradient-to-r from-[#ff4f62] to-[#ffb06f] transition-[width] duration-300"
@@ -286,6 +353,18 @@ export default function GameCanvas() {
             <span className="grid gap-1 text-center text-xs font-semibold text-slate-500">
               <Zap className="mx-auto size-6 text-[#1eaee9]" strokeWidth={2.2} />
               {stats.shockwaveReady ? "Wave" : `${Math.round(stats.shockwaveCharge)}%`}
+            </span>
+          </button>
+          <button
+            aria-label={shieldLabel}
+            className="pointer-events-auto grid size-[86px] place-items-center rounded-lg border border-white/80 bg-white/85 text-slate-900 shadow-[0_18px_48px_rgba(38,55,77,0.1)] backdrop-blur-xl transition hover:-translate-y-0.5 hover:bg-white focus:outline-none focus:ring-2 focus:ring-[#1eaee9]/50 disabled:cursor-not-allowed disabled:opacity-55"
+            disabled={!stats.shieldReady || stats.paused || stats.status !== "playing"}
+            onClick={activateShield}
+            type="button"
+          >
+            <span className="grid gap-1 text-center text-xs font-semibold text-slate-500">
+              <Shield className="mx-auto size-6 text-[#1eaee9]" strokeWidth={2.2} />
+              {stats.shieldActive ? `${Math.ceil(stats.shieldTimer)}s` : stats.shieldReady ? "Shield" : `${Math.ceil(stats.shieldCooldownRemaining)}s`}
             </span>
           </button>
           <button
@@ -317,6 +396,15 @@ export default function GameCanvas() {
             <Zap className="size-4" strokeWidth={2.2} />
           </button>
           <button
+            aria-label={shieldLabel}
+            className="grid size-9 place-items-center rounded-full bg-[#edfaff] text-[#0ea5d7] transition hover:bg-[#d8f5ff] focus:outline-none focus:ring-2 focus:ring-[#1eaee9]/50 disabled:cursor-not-allowed disabled:opacity-45"
+            disabled={!stats.shieldReady || stats.paused || stats.status !== "playing"}
+            onClick={activateShield}
+            type="button"
+          >
+            <Shield className="size-4" strokeWidth={2.2} />
+          </button>
+          <button
             aria-label={pauseLabel}
             aria-pressed={stats.paused}
             className="grid size-9 place-items-center rounded-full bg-slate-900 text-white transition hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-[#1eaee9]/50"
@@ -327,6 +415,17 @@ export default function GameCanvas() {
           </button>
         </div>
       </div>
+
+      <select
+        aria-label="AI difficulty"
+        className="pointer-events-auto absolute bottom-[160px] left-4 z-10 h-9 rounded-full border border-white/80 bg-white/90 px-3 text-xs font-semibold uppercase text-slate-500 shadow-[0_18px_42px_rgba(38,55,77,0.1)] outline-none backdrop-blur-xl transition focus:border-[#1eaee9] focus:ring-2 focus:ring-[#1eaee9]/20 md:bottom-24 lg:hidden"
+        onChange={(event) => changeDifficulty(event.target.value as AIDifficulty)}
+        value={stats.aiDifficulty}
+      >
+        <option value="easy">Easy AI</option>
+        <option value="medium">Medium AI</option>
+        <option value="hard">Hard AI</option>
+      </select>
 
       <div className="pointer-events-auto absolute bottom-[104px] left-4 z-10 inline-flex h-12 max-w-[210px] items-center gap-2 rounded-full border border-white/80 bg-white/90 px-2 text-sm font-semibold text-slate-900 shadow-[0_18px_48px_rgba(38,55,77,0.1)] backdrop-blur-xl md:bottom-5 md:left-5 md:h-14 md:max-w-none md:gap-3 md:rounded-lg md:px-3 md:text-base">
         <button
@@ -388,16 +487,16 @@ export default function GameCanvas() {
           value={stats.cleansedCount.toLocaleString()}
         />
         <MobileStat
-          ariaLabel={`${infectionPercent} percent infection level`}
-          icon={Activity}
-          label={`${coveragePercent}% held`}
+          ariaLabel={`Player level ${stats.playerLevel}, ${playerHealthPercent} percent health, ${playerShieldPercent} percent shield`}
+          icon={Shield}
+          label={`L${stats.playerLevel} XP ${playerXpLabel}`}
           tone="neutral"
-          value={`${infectionPercent}%`}
+          value={`${playerHealthPercent}/${playerShieldPercent}`}
         />
       </div>
 
       {debugVisible && debugStats && (
-        <div className="pointer-events-none absolute left-3 top-28 z-30 w-[244px] rounded-lg border border-slate-900/10 bg-white/92 p-3 font-mono text-[11px] leading-5 text-slate-700 shadow-[0_18px_48px_rgba(38,55,77,0.14)] backdrop-blur-xl sm:left-5 sm:top-32">
+        <div className="pointer-events-none absolute left-3 top-28 z-30 w-[276px] rounded-lg border border-slate-900/10 bg-white/92 p-3 font-mono text-[11px] leading-5 text-slate-700 shadow-[0_18px_48px_rgba(38,55,77,0.14)] backdrop-blur-xl sm:left-5 sm:top-32">
           <div className="mb-1 flex items-center gap-2 font-sans text-xs font-semibold text-slate-900">
             <Bug className="size-4 text-slate-600" strokeWidth={2} />
             Diagnostics
@@ -451,6 +550,30 @@ export default function GameCanvas() {
             <span className="text-right">{debugStats.dotSpriteCount}</span>
             <span>Pixi FX</span>
             <span className="text-right">{debugStats.activeEffectObjectCount}</span>
+            <span>Player L</span>
+            <span className="text-right">
+              {debugStats.playerLevel} ({debugStats.playerXp} xp)
+            </span>
+            <span>Player HP</span>
+            <span className="text-right">
+              {Math.round(debugStats.playerHealth)}/{Math.round(debugStats.playerShield)} sh
+            </span>
+            <span>Shield</span>
+            <span className="text-right">
+              {debugStats.shieldTimer > 0
+                ? `${debugStats.shieldTimer.toFixed(1)}s`
+                : `${debugStats.shieldCooldownRemaining.toFixed(1)}s cd`}
+            </span>
+            <span>Respawn</span>
+            <span className="text-right">{debugStats.playerRespawnTimer.toFixed(1)}s</span>
+            <span>AI</span>
+            <span className="text-right">{debugStats.aiDifficulty}</span>
+            <span>Deaths</span>
+            <span className="text-right">
+              P{debugStats.playerDeaths}/E{debugStats.enemyDeaths}
+            </span>
+            <span className="col-span-2 truncate">Enemy HP {debugStats.enemyHealthSummary}</span>
+            <span className="col-span-2 truncate">AI {debugStats.aiTargets}</span>
           </div>
         </div>
       )}

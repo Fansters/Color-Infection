@@ -72,7 +72,7 @@ export function PixiGameCanvas({ game, debugVisible, onStats, onDebugStats }: Pi
       }
 
       game.resize(rect.width, rect.height);
-      pixiRenderer.sync(game.getRenderState());
+      pixiRenderer.sync(game.getRenderState(debugVisibleRef.current));
       callbacksRef.current.onStats(game.getStats());
 
       resizeObserver = new ResizeObserver(resize);
@@ -88,7 +88,7 @@ export function PixiGameCanvas({ game, debugVisible, onStats, onDebugStats }: Pi
         game.update(dt);
         const updateMs = performance.now() - updateStarted;
         const syncStarted = performance.now();
-        const pixiMetrics = pixiRenderer.sync(game.getRenderState());
+        const pixiMetrics = pixiRenderer.sync(game.getRenderState(debugVisibleRef.current));
         const syncMs = performance.now() - syncStarted;
 
         game.recordFrameMetrics(frameMs, updateMs, syncMs, dprRef.current, pixiMetrics);

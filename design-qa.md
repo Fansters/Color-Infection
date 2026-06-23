@@ -83,4 +83,34 @@
   - `C:\Users\edmun\OneDrive\Dokumenti\Color Infection\artifacts\color-infection-v105-node-capture.png`
   - `C:\Users\edmun\OneDrive\Dokumenti\Color Infection\artifacts\color-infection-v105-mobile.png`
 
+## V1.06 Core Combat + Smarter Enemy AI QA
+
+**Scope**
+- Added core stats, leveling, health, shields, death/respawn, bases, and the level 3 shield ability.
+- Added clash combat on player/enemy overlap while preserving elastic pushback and contested collision zones.
+- Added AI difficulty selection and scored enemy target selection across expand, contest, defend, attack, recover, and retreat behavior.
+- Preserved V1.05 PixiJS renderer, pulse optimization, HUD layout, pause/reset, staged levels, mobile controls, and diagnostics.
+
+**Implementation Notes**
+- `Game.ts` remains the simulation owner for combat, XP, respawns, bases, shield cooldown, difficulty settings, target scoring, and debug stats.
+- `PixiRenderer.ts` renders base pulses, health rings, shield rings, invulnerability rings, shield shells, level/combat feedback, and debug target lines from render snapshots.
+- React HUD now exposes AI difficulty, player level, XP, HP, shield, shield button, and expanded diagnostics without moving scene rendering out of Pixi.
+
+**Verification**
+- `npm.cmd run lint`: passed.
+- `npm.cmd run build`: passed.
+- Browser smoke test with system Chrome: passed.
+  - Desktop canvas rendered at 1440x900 with no console/page errors.
+  - `D` toggled diagnostics.
+  - `Space` fired shockwave and updated pulse diagnostics.
+  - `E` triggered shield input path.
+  - Level 6/6 Open War loaded with multiple enemies.
+  - Hard AI selection persisted in diagnostics.
+  - Enemy HP/shield summaries and selected AI targets appeared in the debug overlay.
+  - Mobile 390x844 viewport rendered the Pixi canvas, compact HUD, bottom stats, and difficulty selector with no console/page errors.
+
+**Residual Risk**
+- Full five-minute human-play soak for V1.06 combat balance was not run.
+- Core combat numbers are first-pass prototype tuning and may need iteration after feel testing.
+
 final result: passed

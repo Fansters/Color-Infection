@@ -45,6 +45,7 @@ export class PixiRenderer {
   private textures: PixiTextures | null = null;
   private backgroundGraphics = new Graphics({ label: "backgroundGraphics" });
   private arenaFrameGraphics = new Graphics({ label: "arenaFrameGraphics" });
+  private baseGraphics = new Graphics({ label: "baseGraphics" });
   private modifierGraphics = new Graphics({ label: "modifierGraphics" });
   private nodeGraphics = new Graphics({ label: "nodeGraphics" });
   private coreAuraGraphics = new Graphics({ label: "coreAuraGraphics" });
@@ -100,7 +101,7 @@ export class PixiRenderer {
     this.layers = createPixiLayers(app.stage);
     this.layers.backgroundLayer.addChild(this.backgroundGraphics, this.arenaFrameGraphics);
     this.layers.territoryLayer.addChild(this.frontlineGraphics);
-    this.layers.modifierLayer.addChild(this.modifierGraphics, this.destinationGraphics);
+    this.layers.modifierLayer.addChild(this.baseGraphics, this.modifierGraphics, this.destinationGraphics);
     this.layers.nodeLayer.addChild(this.nodeGraphics);
     this.layers.coreLayer.addChild(this.coreAuraGraphics, this.coreMarkGraphics);
     this.ripples = new SpritePool(this.layers.effectLayer, this.textures.ring);
@@ -140,6 +141,7 @@ export class PixiRenderer {
     this.drawBackground(state);
     this.drawArenaMask(state.arena);
     this.drawHaze(state);
+    this.drawBases(state);
     this.syncDots(state);
     this.drawModifiers(state);
     this.drawNodes(state);
@@ -297,6 +299,21 @@ export class PixiRenderer {
     this.drawFrontlines(state);
   }
 
+  private drawBases(state: GameRenderState) {
+    this.baseGraphics.clear();
+
+    for (const base of state.bases) {
+      const isPlayer = base.team === "player";
+      const color = isPlayer ? colorToHex(palette.playerHot) : colorToHex(palette.infectedHot);
+      const edge = isPlayer ? colorToHex(palette.player) : colorToHex(palette.infected);
+      const pulse = pulseScale(state.time, base.pulse, 0.08, 2);
+      const radius = base.radius * pulse;
+      this.baseGraphics.circle(base.x, base.y, radius * 1.28).fill({ color: edge, alpha: isPlayer ? 0.07 : 0.06 });
+      this.baseGraphics.circle(base.x, base.y, radius * 0.78).fill({ color, alpha: isPlayer ? 0.11 : 0.1 });
+      this.baseGraphics.circle(base.x, base.y, radius).stroke({ color, alpha: 0.34, width: 1.6 });
+    }
+  }
+
   private drawViscosityZones(state: GameRenderState) {
     for (const zone of state.viscosityZones) {
       const radius = zone.radius * pulseScale(state.time, zone.phase, 0.08, 0.9);
@@ -436,11 +453,15 @@ export class PixiRenderer {
     }
 
     for (const enemy of state.enemies) {
-      this.drawSoftField(enemy, "enemy");
+      this.drawSoftField(enemy, "enemy", state);
       this.drawEnemyMark(enemy, state.time);
     }
 
-    this.drawSoftField(state.player, "player");
+    this.drawSoftField(state.player, "player", state);
+
+    if (state.debugVisible) {
+      this.drawEnemyTargetDebug(state);
+    }
   }
 
   private syncCoreSprite(agent: Agent, kind: AgentKind) {
@@ -463,11 +484,15 @@ export class PixiRenderer {
     sprite.position.set(agent.x, agent.y);
     sprite.width = size;
     sprite.height = size;
-    sprite.alpha = agent.health < 1 ? 0.72 + agent.health * 0.28 : 1;
-    sprite.visible = true;
+    sprite.alpha = agent.isRespawning ? 0 : clamp(0.68 + (agent.health / Math.max(1, agent.maxHealth)) * 0.32, 0.3, 1);
+    sprite.visible = !agent.isRespawning && agent.active;
   }
 
-  private drawSoftField(agent: Agent, kind: AgentKind) {
+  private drawSoftField(agent: Agent, kind: AgentKind, state: GameRenderState) {
+    if (agent.isRespawning || !agent.active) {
+      return;
+    }
+
     const color = kind === "player" ? colorToHex(palette.playerHot) : colorToHex(palette.infectedHot);
     const edge = kind === "player" ? colorToHex(palette.player) : colorToHex(palette.infected);
     const radius = agent.fieldRadius * (kind === "player" ? 1.08 : 1.02);
@@ -479,6 +504,80 @@ export class PixiRenderer {
       alpha: agent.slowTimer > 0 ? 0.72 : 0.44,
       width: agent.slowTimer > 0 ? 2.4 : 1.4,
     });
+
+    this.drawCoreStatusRing(agent, kind, edge, color);
+
+    if (kind === "player" && state.shieldTimer > 0) {
+      const pulse = 1 + Math.sin(state.time * 7) * 0.045;
+      this.coreAuraGraphics.circle(agent.x, agent.y, (agent.radius + 18) * pulse).stroke({
+        color: colorToHex(palette.playerHot),
+        alpha: 0.56,
+        width: 3.2,
+      });
+    }
+  }
+
+  private drawCoreStatusRing(agent: Agent, kind: AgentKind, edge: number, hot: number) {
+    const healthRatio = clamp(agent.health / Math.max(1, agent.maxHealth), 0, 1);
+    const shieldRatio = clamp(agent.shield / Math.max(1, agent.maxShield), 0, 1);
+    const baseRadius = agent.radius + 12;
+    this.coreAuraGraphics.circle(agent.x, agent.y, baseRadius).stroke({ color: 0xffffff, alpha: 0.32, width: 2.2 });
+    this.drawArcRing(this.coreAuraGraphics, agent.x, agent.y, baseRadius, -Math.PI / 2, healthRatio, {
+      color: edge,
+      alpha: 0.78,
+      width: 2.4,
+    });
+
+    if (shieldRatio > 0.03) {
+      this.drawArcRing(this.coreAuraGraphics, agent.x, agent.y, baseRadius + 5, -Math.PI / 2, shieldRatio, {
+        color: hot,
+        alpha: kind === "player" ? 0.58 : 0.46,
+        width: 2.6,
+      });
+    }
+
+    if (agent.invulnerableTimer > 0) {
+      const pulse = 1 + Math.sin((this.app?.ticker.lastTime ?? 0) * 0.01 + agent.id) * 0.06;
+      this.coreAuraGraphics.circle(agent.x, agent.y, (baseRadius + 10) * pulse).stroke({
+        color: 0xffffff,
+        alpha: 0.48,
+        width: 1.5,
+      });
+    }
+  }
+
+  private drawArcRing(
+    graphic: Graphics,
+    x: number,
+    y: number,
+    radius: number,
+    start: number,
+    ratio: number,
+    style: { color: number; alpha: number; width: number },
+  ) {
+    const clamped = clamp(ratio, 0, 1);
+
+    if (clamped <= 0.001) {
+      return;
+    }
+
+    const end = start + Math.PI * 2 * clamped;
+    graphic.moveTo(x + Math.cos(start) * radius, y + Math.sin(start) * radius).arc(x, y, radius, start, end);
+    graphic.stroke(style);
+  }
+
+  private drawEnemyTargetDebug(state: GameRenderState) {
+    for (const enemy of state.enemies) {
+      if (!enemy.active || enemy.isRespawning) {
+        continue;
+      }
+
+      this.coreMarkGraphics
+        .moveTo(enemy.x, enemy.y)
+        .lineTo(enemy.targetX, enemy.targetY)
+        .stroke({ color: 0xff8a54, alpha: 0.38, width: 1.1 });
+      this.coreMarkGraphics.circle(enemy.targetX, enemy.targetY, 8).stroke({ color: 0xff8a54, alpha: 0.48, width: 1.2 });
+    }
   }
 
   private drawEnemyMark(enemy: Agent, time: number) {

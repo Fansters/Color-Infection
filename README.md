@@ -2,11 +2,11 @@
 
 Color Infection is a web-based 2D territorial puzzle prototype built with Next.js App Router, TypeScript, React, PixiJS, and Tailwind CSS.
 
-## Version 1.05
+## Version 1.06
 
-Version 1.05 is the PixiJS Phase 2 pulse and spike optimization pass. It preserves V1.04 gameplay, levels, enemies, HUD, controls, pause/reset, and diagnostics while making shockwaves, enemy pulses, node pulses, and collision rings cheaper and smoother.
+Version 1.06 is the Core Combat + Smarter Enemy AI pass. It preserves the V1.05 PixiJS renderer, pulse optimization work, staged levels, controls, HUD, pause/reset, and diagnostics while adding health, shields, leveling, bases, respawns, a shield ability, and difficulty-aware enemy target selection.
 
-This version also fixes the node capture arc bug where a capture ring could draw a long diagonal line across the arena.
+V1.05's pulse/spike optimizations and node capture arc fix remain in place.
 
 The architecture is intentionally split:
 
@@ -25,9 +25,32 @@ The architecture is intentionally split:
   - tap to move the player core.
 - A cyan destination ring and faint path line stay visible until the core arrives.
 - The player cleanses infected dots, spreads blue territory, captures objectives, and uses shockwave at high-risk moments.
-- Player and enemy cores collide elastically, push apart, slow briefly, and create contested gray shock zones.
+- Player and enemy cores collide elastically, push apart, slow briefly, create contested gray shock zones, and now deal clash damage through shield and health.
+- Core death is a setback, not an instant match end:
+  - defeated enemy cores respawn at their bases after a short delay,
+  - the player respawns at the player base with a territory penalty and temporary invulnerability.
+- Blue and red bases pulse softly, restore nearby friendly shields, and act as respawn anchors.
 - Pause stops timer, movement, infection, cleansing, nodes, pulses, particles, and dot animation.
 - Reset restarts the current level.
+
+### Core Combat And Progression
+
+- Player and enemy cores have level, XP, health, shield, mass, move speed, influence radius, power, base position, respawn state, and invulnerability timers.
+- Player levels 1-5 by cleansing infected dots, capturing nodes, and destroying enemy cores.
+- Level-ups increase max health, shield capacity, influence radius, cleanse power, clash power, and visual core intensity.
+- Level 2 strengthens shockwave.
+- Level 3 unlocks the shield ability.
+- Level 4 shockwave leaves short-lived protected blue territory.
+- Level 5 provides a larger aura and stronger clash power with slightly slower movement.
+- Health and shield rings render around player and enemy cores in Pixi.
+- Invulnerable or shielded cores display subtle ring/shell feedback.
+
+### Shield Ability
+
+- Press `E` or use the shield UI button to activate the player shield after it unlocks on level 3.
+- Shield duration: 6 seconds.
+- Shield cooldown: 12 seconds.
+- The shield adds temporary protection and a cyan shell/ring around the player core.
 
 ### Level Structure
 
@@ -50,12 +73,23 @@ Use the level control to step through levels.
 - Splitter: breaks into smaller hunter-style infection cores when damaged.
 - Root: stationary; in advanced levels it creates branching infection pressure.
 
-Enemy AI still uses four readable modes:
+Enemy AI still uses readable modes:
 
 - `expand`: grows into neutral territory.
 - `contest`: pressures red/blue frontlines and weak blue frontier dots.
 - `defend`: retreats toward its infected home when invaded.
 - `attack`: briefly pressures the player core, mostly from hunter-type enemies.
+- `recover` / `retreat`: pulls back toward base when health is low or the fight is unfavorable.
+
+Enemy targeting now uses scored candidates instead of direct chasing. Each enemy periodically evaluates neutral clusters, weak blue frontiers, nodes, bases, player territory, and the player core. Scores consider distance, territory value, node value, safety, player weakness, support, difficulty, and enemy variant role.
+
+### AI Difficulty
+
+Use the AI difficulty selector in the HUD:
+
+- Easy: slower decisions, more randomness, lower aggression, weaker infection/clash pressure, rare player hunts.
+- Medium: balanced frontier pressure, node capture, and sensible retreat behavior.
+- Hard: faster decisions, stronger target scoring, smarter node priority, earlier retreats, and opportunistic attacks when the player is weak or exposed.
 
 ### Arena Modifiers
 
@@ -70,6 +104,7 @@ Enemy AI still uses four readable modes:
 - Shockwave emits a large, expanding cleansing pulse from the player core.
 - Using it drains 10% of current player territory and turns those dots neutral.
 - Standing in blue territory, owning nodes, and using energy wells improves recharge.
+- Shockwave also pushes enemy cores away and briefly interrupts clash pressure.
 
 ### Strategic Nodes
 
@@ -167,7 +202,15 @@ The overlay shows:
 - Pixi renderer type,
 - stage child count,
 - dot sprite count,
-- active Pixi effect object count.
+- active Pixi effect object count,
+- player level and XP,
+- player health and shield,
+- shield cooldown/duration,
+- player respawn timer,
+- AI difficulty,
+- enemy health/shield summary,
+- selected AI target/mode per enemy,
+- player and enemy death counters.
 
 ### Visual Direction
 
@@ -175,6 +218,7 @@ The overlay shows:
 - Blue/cyan and red/orange haze makes territory ownership readable.
 - Gray/purple frontline flicker highlights contested zones.
 - Larger nodes, darker viscosity zones, walls, gates, and energy wells add tactical landmarks.
+- Core health rings, shield shells, base pulses, respawn rings, and death bursts make core combat readable without adding shaders.
 - Mobile keeps a compact timer/ability/pause cluster and bottom circular stat indicators.
 
 ### Main Files
