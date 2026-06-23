@@ -1,0 +1,633 @@
+"use client";
+
+import {
+  Activity,
+  Bug,
+  ChevronLeft,
+  ChevronRight,
+  CircleDot,
+  Crosshair,
+  Flag,
+  Pause,
+  Play,
+  RotateCcw,
+  Sparkles,
+  Timer,
+  Zap,
+  type LucideIcon,
+} from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Game, type GameDebugStats, type GameStats } from "@/lib/game/Game";
+
+const initialStats: GameStats = {
+  totalDots: 0,
+  infectedCount: 0,
+  cleansedCount: 0,
+  neutralCount: 0,
+  elapsedSeconds: 0,
+  remainingSeconds: 300,
+  infectionLevel: 0,
+  playerCoverage: 0,
+  shockwaveCharge: 100,
+  shockwaveReady: true,
+  nodePlayerCount: 0,
+  nodeEnemyCount: 0,
+  enemyMode: "expand",
+  enemyCount: 0,
+  enemyTypes: "none",
+  level: 1,
+  maxLevel: 6,
+  levelName: "First Cleanse",
+  levelSummary: "No enemy core. Cleanse the seeded infection field.",
+  overtimeSeconds: 0,
+  stars: 0,
+  paused: false,
+  status: "playing",
+};
+
+type MetricCardProps = {
+  label: string;
+  value: string;
+  tone: "infected" | "clean" | "neutral";
+  icon: LucideIcon;
+};
+
+type MobileStatProps = MetricCardProps & {
+  ariaLabel: string;
+};
+
+function formatTime(seconds: number) {
+  const minutes = Math.floor(seconds / 60)
+    .toString()
+    .padStart(2, "0");
+  const remainingSeconds = Math.floor(seconds % 60)
+    .toString()
+    .padStart(2, "0");
+
+  return `${minutes}:${remainingSeconds}`;
+}
+
+function formatMetricMs(value: number) {
+  return `${value.toFixed(1)}ms`;
+}
+
+function toneStyles(tone: MetricCardProps["tone"]) {
+  return {
+    infected: {
+      icon: "text-[#ff6449] bg-[#fff3ee]",
+      value: "text-[#ff6449]",
+      ring: "border-[#ffd4c8] bg-[#fff9f6]",
+    },
+    clean: {
+      icon: "text-[#1eaee9] bg-[#edfaff]",
+      value: "text-[#1eaee9]",
+      ring: "border-[#c7efff] bg-[#f6fdff]",
+    },
+    neutral: {
+      icon: "text-slate-600 bg-slate-100",
+      value: "text-slate-700",
+      ring: "border-slate-200 bg-white",
+    },
+  }[tone];
+}
+
+function MetricCard({ label, value, tone, icon: Icon }: MetricCardProps) {
+  const styles = toneStyles(tone);
+
+  return (
+    <div className="rounded-lg border border-white/80 bg-white/80 px-4 py-3 shadow-[0_18px_48px_rgba(38,55,77,0.09)] backdrop-blur-xl">
+      <div className="flex items-center gap-2 text-sm font-medium text-slate-500">
+        <span className={`grid size-7 place-items-center rounded-full ${styles.icon}`}>
+          <Icon className="size-4" strokeWidth={1.8} />
+        </span>
+        {label}
+      </div>
+      <div className={`mt-2 text-2xl font-semibold ${styles.value}`}>{value}</div>
+    </div>
+  );
+}
+
+function MobileStat({ label, value, tone, icon: Icon, ariaLabel }: MobileStatProps) {
+  const styles = toneStyles(tone);
+
+  return (
+    <div
+      aria-label={ariaLabel}
+      className={`grid size-[74px] place-items-center rounded-full border text-center shadow-[0_18px_42px_rgba(38,55,77,0.12)] backdrop-blur-xl ${styles.ring}`}
+    >
+      <div>
+        <Icon className={`mx-auto size-4 ${styles.value}`} strokeWidth={2} />
+        <div className={`mt-1 text-lg font-semibold leading-none ${styles.value}`}>{value}</div>
+        <div className="mt-1 text-[10px] font-medium leading-none text-slate-500">{label}</div>
+      </div>
+    </div>
+  );
+}
+
+export default function GameCanvas() {
+  const hostRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const gameRef = useRef<Game | null>(null);
+  const dprRef = useRef(1);
+  const debugVisibleRef = useRef(false);
+  const [stats, setStats] = useState<GameStats>(initialStats);
+  const [debugVisible, setDebugVisible] = useState(false);
+  const [debugStats, setDebugStats] = useState<GameDebugStats | null>(null);
+
+  const syncStats = useCallback(() => {
+    const game = gameRef.current;
+
+    if (game) {
+      setStats(game.getStats());
+    }
+  }, []);
+
+  const resizeCanvas = useCallback(() => {
+    const host = hostRef.current;
+    const canvas = canvasRef.current;
+    const game = gameRef.current;
+
+    if (!host || !canvas || !game) {
+      return;
+    }
+
+    const rect = host.getBoundingClientRect();
+    const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+    dprRef.current = dpr;
+    canvas.width = Math.floor(rect.width * dpr);
+    canvas.height = Math.floor(rect.height * dpr);
+    canvas.style.width = `${rect.width}px`;
+    canvas.style.height = `${rect.height}px`;
+
+    const ctx = canvas.getContext("2d", { alpha: false });
+    ctx?.setTransform(dpr, 0, 0, dpr, 0, 0);
+    game.resize(rect.width, rect.height);
+    syncStats();
+  }, [syncStats]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+
+    if (!canvas) {
+      return;
+    }
+
+    const game = new Game();
+    const ctx = canvas.getContext("2d", { alpha: false });
+    let animationFrame = 0;
+    let lastFrame = performance.now();
+    let lastStatsUpdate = 0;
+    let lastDebugUpdate = 0;
+
+    if (!ctx) {
+      return;
+    }
+
+    gameRef.current = game;
+    resizeCanvas();
+
+    const resizeObserver = new ResizeObserver(resizeCanvas);
+
+    if (hostRef.current) {
+      resizeObserver.observe(hostRef.current);
+    }
+
+    const frame = (timestamp: number) => {
+      const frameMs = timestamp - lastFrame;
+      const dt = frameMs / 1000;
+      lastFrame = timestamp;
+
+      ctx.setTransform(dprRef.current, 0, 0, dprRef.current, 0, 0);
+      const updateStarted = performance.now();
+      game.update(dt);
+      const updateMs = performance.now() - updateStarted;
+      const drawStarted = performance.now();
+      game.draw(ctx);
+      const drawMs = performance.now() - drawStarted;
+      game.recordFrameMetrics(frameMs, updateMs, drawMs, dprRef.current);
+
+      if (timestamp - lastStatsUpdate > 120) {
+        lastStatsUpdate = timestamp;
+        setStats(game.getStats());
+      }
+
+      if (debugVisibleRef.current && timestamp - lastDebugUpdate > 160) {
+        lastDebugUpdate = timestamp;
+        setDebugStats(game.getDebugStats());
+      }
+
+      animationFrame = requestAnimationFrame(frame);
+    };
+
+    animationFrame = requestAnimationFrame(frame);
+
+    return () => {
+      cancelAnimationFrame(animationFrame);
+      resizeObserver.disconnect();
+      gameRef.current = null;
+    };
+  }, [resizeCanvas]);
+
+  useEffect(() => {
+    debugVisibleRef.current = debugVisible;
+  }, [debugVisible]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if ((event.key === "d" || event.key === "D") && !event.repeat) {
+        setDebugVisible((visible) => {
+          const nextVisible = !visible;
+          debugVisibleRef.current = nextVisible;
+
+          if (!nextVisible) {
+            setDebugStats(null);
+          }
+
+          return nextVisible;
+        });
+        return;
+      }
+
+      if (event.code !== "Space" || event.repeat) {
+        return;
+      }
+
+      event.preventDefault();
+      gameRef.current?.activateShockwave();
+      syncStats();
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [syncStats]);
+
+  const commitDestination = useCallback((event: React.PointerEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    const game = gameRef.current;
+
+    if (!canvas || !game) {
+      return;
+    }
+
+    const rect = canvas.getBoundingClientRect();
+    game.setPointer(event.clientX - rect.left, event.clientY - rect.top);
+    syncStats();
+  }, [syncStats]);
+
+  const previewDestination = useCallback((event: React.PointerEvent<HTMLCanvasElement>) => {
+    if (event.pointerType !== "mouse") {
+      return;
+    }
+
+    const canvas = canvasRef.current;
+    const game = gameRef.current;
+
+    if (!canvas || !game) {
+      return;
+    }
+
+    const rect = canvas.getBoundingClientRect();
+    game.setPreview(event.clientX - rect.left, event.clientY - rect.top);
+  }, []);
+
+  const handlePointerDown = useCallback(
+    (event: React.PointerEvent<HTMLCanvasElement>) => {
+      event.currentTarget.setPointerCapture(event.pointerId);
+      commitDestination(event);
+    },
+    [commitDestination],
+  );
+
+  const handlePointerMove = useCallback(
+    (event: React.PointerEvent<HTMLCanvasElement>) => {
+      previewDestination(event);
+    },
+    [previewDestination],
+  );
+
+  const handlePointerUp = useCallback(
+    () => {
+      gameRef.current?.clearPointer();
+    },
+    [],
+  );
+
+  const resetGame = useCallback(() => {
+    gameRef.current?.reset();
+    syncStats();
+  }, [syncStats]);
+
+  const togglePause = useCallback(() => {
+    gameRef.current?.togglePause();
+    syncStats();
+  }, [syncStats]);
+
+  const activateShockwave = useCallback(() => {
+    gameRef.current?.activateShockwave();
+    syncStats();
+  }, [syncStats]);
+
+  const changeLevel = useCallback(
+    (delta: number) => {
+      gameRef.current?.setLevel(stats.level + delta);
+      syncStats();
+    },
+    [stats.level, syncStats],
+  );
+
+  const infectionPercent = Math.round(stats.infectionLevel);
+  const coveragePercent = Math.round(stats.playerCoverage);
+  const statusLabel =
+    stats.status === "won"
+      ? "Field secured"
+      : stats.status === "lost"
+        ? "Infection critical"
+        : stats.paused
+          ? "Paused"
+          : "Infection level";
+  const pauseLabel = stats.paused ? "Resume game" : "Pause game";
+  const PauseIcon = stats.paused ? Play : Pause;
+  const shockwaveLabel = stats.shockwaveReady
+    ? "Shockwave ready"
+    : `Shockwave ${Math.round(stats.shockwaveCharge)} percent charged`;
+  const enemySummary =
+    stats.enemyCount > 0
+      ? `Enemy ${stats.enemyMode} - ${stats.enemyTypes} - Nodes ${stats.nodePlayerCount}-${stats.nodeEnemyCount}`
+      : "No enemy core - cleanse the field";
+
+  return (
+    <section
+      ref={hostRef}
+      className="relative min-h-svh w-full overflow-hidden bg-[#eef4f8] text-slate-900"
+    >
+      <canvas
+        ref={canvasRef}
+        aria-label="Color Infection arena. Move the mouse to preview, click or tap to set destination, press Space for shockwave, press D for diagnostics."
+        className="absolute inset-0 h-full w-full touch-none"
+        onPointerCancel={() => gameRef.current?.clearPointer()}
+        onPointerDown={handlePointerDown}
+        onPointerLeave={() => gameRef.current?.clearPointer()}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        role="application"
+      />
+
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-start justify-between gap-2 px-3 pt-4 sm:gap-4 sm:px-6">
+        <div className="flex min-w-0 items-center gap-2 sm:gap-4">
+          <div className="grid size-11 shrink-0 place-items-center rounded-lg border border-white/80 bg-white/85 shadow-[0_18px_48px_rgba(38,55,77,0.1)] backdrop-blur-xl sm:size-20">
+            <Sparkles className="size-7 text-[#1eaee9] sm:size-8" strokeWidth={1.8} />
+          </div>
+          <h1 className="max-w-[142px] text-[1.7rem] font-semibold leading-none text-slate-900 sm:max-w-none sm:text-5xl">
+            Color{" "}
+            <span className="bg-gradient-to-r from-[#ff6449] via-[#e456a7] to-[#1eaee9] bg-clip-text text-transparent">
+              Infection
+            </span>
+          </h1>
+        </div>
+
+        <div className="hidden min-w-[880px] grid-cols-[1fr_1fr_1fr_1.35fr_auto_auto] gap-3 lg:grid">
+          <MetricCard
+            icon={CircleDot}
+            label="Infected"
+            tone="infected"
+            value={stats.infectedCount.toLocaleString()}
+          />
+          <MetricCard
+            icon={Crosshair}
+            label="Cleansed"
+            tone="clean"
+            value={stats.cleansedCount.toLocaleString()}
+          />
+          <MetricCard icon={Timer} label="Time" tone="neutral" value={formatTime(stats.remainingSeconds)} />
+          <div className="rounded-lg border border-white/80 bg-white/80 px-4 py-3 shadow-[0_18px_48px_rgba(38,55,77,0.09)] backdrop-blur-xl">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 text-sm font-medium text-slate-500">
+                <span className="grid size-7 place-items-center rounded-full bg-slate-100 text-slate-600">
+                  <Activity className="size-4" strokeWidth={1.8} />
+                </span>
+                {statusLabel}
+              </div>
+              <div className="text-2xl font-semibold text-[#ff6449]">{infectionPercent}%</div>
+            </div>
+            <div className="mt-1 text-xs font-medium uppercase text-slate-400">
+              {enemySummary}
+            </div>
+            <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-100">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-[#ff4f62] to-[#ffb06f] transition-[width] duration-300"
+                style={{ width: `${infectionPercent}%` }}
+              />
+            </div>
+          </div>
+          <button
+            aria-label={shockwaveLabel}
+            className="pointer-events-auto grid size-[86px] place-items-center rounded-lg border border-white/80 bg-white/85 text-slate-900 shadow-[0_18px_48px_rgba(38,55,77,0.1)] backdrop-blur-xl transition hover:-translate-y-0.5 hover:bg-white focus:outline-none focus:ring-2 focus:ring-[#1eaee9]/50 disabled:cursor-not-allowed disabled:opacity-55"
+            disabled={!stats.shockwaveReady || stats.paused || stats.status !== "playing"}
+            onClick={activateShockwave}
+            type="button"
+          >
+            <span className="grid gap-1 text-center text-xs font-semibold text-slate-500">
+              <Zap className="mx-auto size-6 text-[#1eaee9]" strokeWidth={2.2} />
+              {stats.shockwaveReady ? "Wave" : `${Math.round(stats.shockwaveCharge)}%`}
+            </span>
+          </button>
+          <button
+            aria-label={pauseLabel}
+            aria-pressed={stats.paused}
+            className="pointer-events-auto grid size-[86px] place-items-center rounded-lg border border-white/80 bg-white/85 text-slate-900 shadow-[0_18px_48px_rgba(38,55,77,0.1)] backdrop-blur-xl transition hover:-translate-y-0.5 hover:bg-white focus:outline-none focus:ring-2 focus:ring-[#1eaee9]/50"
+            onClick={togglePause}
+            type="button"
+          >
+            <span className="grid gap-1 text-center text-xs font-semibold text-slate-500">
+              <PauseIcon className="mx-auto size-6 text-slate-900" strokeWidth={2} />
+              {stats.paused ? "Resume" : "Pause"}
+            </span>
+          </button>
+        </div>
+
+        <div className="pointer-events-auto flex shrink-0 items-center gap-1 rounded-full border border-white/80 bg-white/88 p-1 shadow-[0_18px_42px_rgba(38,55,77,0.12)] backdrop-blur-xl lg:hidden">
+          <div className="flex items-center gap-1.5 px-1.5 text-base font-semibold text-slate-800">
+            <Timer className="size-4 text-slate-500" strokeWidth={2} />
+            {formatTime(stats.remainingSeconds)}
+          </div>
+          <button
+            aria-label={shockwaveLabel}
+            className="grid size-9 place-items-center rounded-full bg-[#eafaff] text-[#0ea5d7] transition hover:bg-[#d8f5ff] focus:outline-none focus:ring-2 focus:ring-[#1eaee9]/50 disabled:cursor-not-allowed disabled:opacity-45"
+            disabled={!stats.shockwaveReady || stats.paused || stats.status !== "playing"}
+            onClick={activateShockwave}
+            type="button"
+          >
+            <Zap className="size-4" strokeWidth={2.2} />
+          </button>
+          <button
+            aria-label={pauseLabel}
+            aria-pressed={stats.paused}
+            className="grid size-9 place-items-center rounded-full bg-slate-900 text-white transition hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-[#1eaee9]/50"
+            onClick={togglePause}
+            type="button"
+          >
+            <PauseIcon className="size-4" strokeWidth={2.2} />
+          </button>
+        </div>
+      </div>
+
+      <div className="pointer-events-auto absolute bottom-[104px] left-4 z-10 inline-flex h-12 max-w-[210px] items-center gap-2 rounded-full border border-white/80 bg-white/90 px-2 text-sm font-semibold text-slate-900 shadow-[0_18px_48px_rgba(38,55,77,0.1)] backdrop-blur-xl md:bottom-5 md:left-5 md:h-14 md:max-w-none md:gap-3 md:rounded-lg md:px-3 md:text-base">
+        <button
+          aria-label="Previous level"
+          className="grid size-8 place-items-center rounded-full text-slate-600 transition hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-[#1eaee9]/50 disabled:cursor-not-allowed disabled:opacity-35 md:size-9"
+          disabled={stats.level <= 1}
+          onClick={() => changeLevel(-1)}
+          type="button"
+        >
+          <ChevronLeft className="size-4" strokeWidth={2.2} />
+        </button>
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="grid size-8 shrink-0 place-items-center rounded-full bg-[#edfaff] text-[#1eaee9]">
+            <Flag className="size-4" strokeWidth={2} />
+          </span>
+          <div className="min-w-0 leading-tight">
+            <div className="whitespace-nowrap text-xs font-semibold uppercase text-slate-400 md:text-[11px]">
+              Level {stats.level}/{stats.maxLevel}
+            </div>
+            <div className="truncate text-sm font-semibold text-slate-900 md:max-w-[170px] md:text-base">
+              {stats.levelName}
+            </div>
+          </div>
+        </div>
+        <button
+          aria-label="Next level"
+          className="grid size-8 place-items-center rounded-full text-slate-600 transition hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-[#1eaee9]/50 disabled:cursor-not-allowed disabled:opacity-35 md:size-9"
+          disabled={stats.level >= stats.maxLevel}
+          onClick={() => changeLevel(1)}
+          type="button"
+        >
+          <ChevronRight className="size-4" strokeWidth={2.2} />
+        </button>
+      </div>
+
+      <button
+        aria-label="Reset game"
+        className="pointer-events-auto absolute bottom-[104px] right-4 z-10 inline-flex h-12 items-center gap-2 rounded-full border border-white/80 bg-white/90 px-4 text-sm font-semibold text-slate-900 shadow-[0_18px_48px_rgba(38,55,77,0.1)] backdrop-blur-xl transition hover:-translate-y-0.5 hover:bg-white focus:outline-none focus:ring-2 focus:ring-[#1eaee9]/50 md:bottom-5 md:right-5 md:h-14 md:gap-3 md:rounded-lg md:px-5 md:text-base"
+        onClick={resetGame}
+        type="button"
+      >
+        <RotateCcw className="size-5" strokeWidth={2} />
+        Reset
+      </button>
+
+      <div className="pointer-events-none absolute inset-x-0 bottom-4 z-10 flex justify-center gap-3 md:hidden">
+        <MobileStat
+          ariaLabel={`${stats.infectedCount} infected dots`}
+          icon={CircleDot}
+          label="Infected"
+          tone="infected"
+          value={stats.infectedCount.toLocaleString()}
+        />
+        <MobileStat
+          ariaLabel={`${stats.cleansedCount} cleansed dots`}
+          icon={Crosshair}
+          label="Cured"
+          tone="clean"
+          value={stats.cleansedCount.toLocaleString()}
+        />
+        <MobileStat
+          ariaLabel={`${infectionPercent} percent infection level`}
+          icon={Activity}
+          label={`${coveragePercent}% held`}
+          tone="neutral"
+          value={`${infectionPercent}%`}
+        />
+      </div>
+
+      {debugVisible && debugStats && (
+        <div className="pointer-events-none absolute left-3 top-28 z-30 w-[214px] rounded-lg border border-slate-900/10 bg-white/92 p-3 font-mono text-[11px] leading-5 text-slate-700 shadow-[0_18px_48px_rgba(38,55,77,0.14)] backdrop-blur-xl sm:left-5 sm:top-32">
+          <div className="mb-1 flex items-center gap-2 font-sans text-xs font-semibold text-slate-900">
+            <Bug className="size-4 text-slate-600" strokeWidth={2} />
+            Diagnostics
+          </div>
+          <div className="grid grid-cols-2 gap-x-3">
+            <span>FPS</span>
+            <span className="text-right">{debugStats.fps}</span>
+            <span>Frame</span>
+            <span className="text-right">{formatMetricMs(debugStats.frameMs)}</span>
+            <span>Update</span>
+            <span className="text-right">{formatMetricMs(debugStats.updateMs)}</span>
+            <span>Draw</span>
+            <span className="text-right">{formatMetricMs(debugStats.drawMs)}</span>
+            <span>Dots</span>
+            <span className="text-right">{debugStats.dotCount}</span>
+            <span>Ripples</span>
+            <span className="text-right">{debugStats.rippleCount}</span>
+            <span>Particles</span>
+            <span className="text-right">{debugStats.particleCount}</span>
+            <span>Pulses</span>
+            <span className="text-right">{debugStats.pulseCount}</span>
+            <span>Effects</span>
+            <span className="text-right">{debugStats.activeEffectCount}</span>
+            <span>DPR</span>
+            <span className="text-right">{debugStats.dpr.toFixed(2)}</span>
+            <span>Haze</span>
+            <span className="text-right">
+              {Math.round(debugStats.hazeScale * 100)}%/{debugStats.hazeEvery}f
+            </span>
+          </div>
+        </div>
+      )}
+
+      {stats.paused && stats.status === "playing" && (
+        <div className="pointer-events-none absolute inset-0 z-20 grid place-items-center px-5">
+          <button
+            className="pointer-events-auto inline-flex h-14 items-center gap-3 rounded-full border border-white/80 bg-white/90 px-6 text-base font-semibold text-slate-900 shadow-[0_24px_80px_rgba(38,55,77,0.16)] backdrop-blur-xl transition hover:-translate-y-0.5 hover:bg-white focus:outline-none focus:ring-2 focus:ring-[#1eaee9]/50"
+            onClick={togglePause}
+            type="button"
+          >
+            <Play className="size-5" strokeWidth={2} />
+            Resume
+          </button>
+        </div>
+      )}
+
+      {stats.status !== "playing" && (
+        <div className="absolute inset-0 z-20 grid place-items-center bg-white/35 px-5 backdrop-blur-[2px]">
+          <div className="w-full max-w-sm rounded-lg border border-white/80 bg-white/90 p-6 text-center shadow-[0_24px_80px_rgba(38,55,77,0.16)] backdrop-blur-xl">
+            <div
+              className={`mx-auto grid size-12 place-items-center rounded-full ${
+                stats.status === "won"
+                  ? "bg-[#edfaff] text-[#1eaee9]"
+                  : "bg-[#fff3ee] text-[#ff6449]"
+              }`}
+            >
+              {stats.status === "won" ? (
+                <Sparkles className="size-6" strokeWidth={1.9} />
+              ) : (
+                <Activity className="size-6" strokeWidth={1.9} />
+              )}
+            </div>
+            <h2 className="mt-4 text-2xl font-semibold text-slate-900">
+              {stats.status === "won" ? "Field secured" : "Infection critical"}
+            </h2>
+            {stats.status === "won" && (
+              <div className="mt-2 text-lg font-semibold text-[#1eaee9]">
+                {stats.stars || 1} star{(stats.stars || 1) === 1 ? "" : "s"}
+              </div>
+            )}
+            <p className="mt-2 text-sm leading-6 text-slate-600">
+              {stats.status === "won"
+                ? "The player core controls 70% of the active field."
+                : "The infection controls 75% of the active field."}
+            </p>
+            <button
+              className="mt-5 inline-flex h-11 items-center gap-2 rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white transition hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-[#1eaee9]/50"
+              onClick={resetGame}
+              type="button"
+            >
+              <RotateCcw className="size-4" strokeWidth={2} />
+              Reset
+            </button>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
