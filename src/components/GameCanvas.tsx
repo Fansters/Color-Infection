@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Game, type GameDebugStats, type GameStats } from "@/lib/game/Game";
+import { PixiGameCanvas } from "@/components/PixiGameCanvas";
 
 const initialStats: GameStats = {
   totalDots: 0,
@@ -125,10 +126,8 @@ function MobileStat({ label, value, tone, icon: Icon, ariaLabel }: MobileStatPro
 }
 
 export default function GameCanvas() {
-  const hostRef = useRef<HTMLDivElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const gameRef = useRef<Game | null>(null);
-  const dprRef = useRef(1);
+  const [game] = useState(() => new Game());
+  const gameRef = useRef(game);
   const debugVisibleRef = useRef(false);
   const [stats, setStats] = useState<GameStats>(initialStats);
   const [debugVisible, setDebugVisible] = useState(false);
@@ -141,92 +140,6 @@ export default function GameCanvas() {
       setStats(game.getStats());
     }
   }, []);
-
-  const resizeCanvas = useCallback(() => {
-    const host = hostRef.current;
-    const canvas = canvasRef.current;
-    const game = gameRef.current;
-
-    if (!host || !canvas || !game) {
-      return;
-    }
-
-    const rect = host.getBoundingClientRect();
-    const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
-    dprRef.current = dpr;
-    canvas.width = Math.floor(rect.width * dpr);
-    canvas.height = Math.floor(rect.height * dpr);
-    canvas.style.width = `${rect.width}px`;
-    canvas.style.height = `${rect.height}px`;
-
-    const ctx = canvas.getContext("2d", { alpha: false });
-    ctx?.setTransform(dpr, 0, 0, dpr, 0, 0);
-    game.resize(rect.width, rect.height);
-    syncStats();
-  }, [syncStats]);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-
-    if (!canvas) {
-      return;
-    }
-
-    const game = new Game();
-    const ctx = canvas.getContext("2d", { alpha: false });
-    let animationFrame = 0;
-    let lastFrame = performance.now();
-    let lastStatsUpdate = 0;
-    let lastDebugUpdate = 0;
-
-    if (!ctx) {
-      return;
-    }
-
-    gameRef.current = game;
-    resizeCanvas();
-
-    const resizeObserver = new ResizeObserver(resizeCanvas);
-
-    if (hostRef.current) {
-      resizeObserver.observe(hostRef.current);
-    }
-
-    const frame = (timestamp: number) => {
-      const frameMs = timestamp - lastFrame;
-      const dt = frameMs / 1000;
-      lastFrame = timestamp;
-
-      ctx.setTransform(dprRef.current, 0, 0, dprRef.current, 0, 0);
-      const updateStarted = performance.now();
-      game.update(dt);
-      const updateMs = performance.now() - updateStarted;
-      const drawStarted = performance.now();
-      game.draw(ctx);
-      const drawMs = performance.now() - drawStarted;
-      game.recordFrameMetrics(frameMs, updateMs, drawMs, dprRef.current);
-
-      if (timestamp - lastStatsUpdate > 120) {
-        lastStatsUpdate = timestamp;
-        setStats(game.getStats());
-      }
-
-      if (debugVisibleRef.current && timestamp - lastDebugUpdate > 160) {
-        lastDebugUpdate = timestamp;
-        setDebugStats(game.getDebugStats());
-      }
-
-      animationFrame = requestAnimationFrame(frame);
-    };
-
-    animationFrame = requestAnimationFrame(frame);
-
-    return () => {
-      cancelAnimationFrame(animationFrame);
-      resizeObserver.disconnect();
-      gameRef.current = null;
-    };
-  }, [resizeCanvas]);
 
   useEffect(() => {
     debugVisibleRef.current = debugVisible;
@@ -261,57 +174,6 @@ export default function GameCanvas() {
 
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [syncStats]);
-
-  const commitDestination = useCallback((event: React.PointerEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    const game = gameRef.current;
-
-    if (!canvas || !game) {
-      return;
-    }
-
-    const rect = canvas.getBoundingClientRect();
-    game.setPointer(event.clientX - rect.left, event.clientY - rect.top);
-    syncStats();
-  }, [syncStats]);
-
-  const previewDestination = useCallback((event: React.PointerEvent<HTMLCanvasElement>) => {
-    if (event.pointerType !== "mouse") {
-      return;
-    }
-
-    const canvas = canvasRef.current;
-    const game = gameRef.current;
-
-    if (!canvas || !game) {
-      return;
-    }
-
-    const rect = canvas.getBoundingClientRect();
-    game.setPreview(event.clientX - rect.left, event.clientY - rect.top);
-  }, []);
-
-  const handlePointerDown = useCallback(
-    (event: React.PointerEvent<HTMLCanvasElement>) => {
-      event.currentTarget.setPointerCapture(event.pointerId);
-      commitDestination(event);
-    },
-    [commitDestination],
-  );
-
-  const handlePointerMove = useCallback(
-    (event: React.PointerEvent<HTMLCanvasElement>) => {
-      previewDestination(event);
-    },
-    [previewDestination],
-  );
-
-  const handlePointerUp = useCallback(
-    () => {
-      gameRef.current?.clearPointer();
-    },
-    [],
-  );
 
   const resetGame = useCallback(() => {
     gameRef.current?.reset();
@@ -358,19 +220,13 @@ export default function GameCanvas() {
 
   return (
     <section
-      ref={hostRef}
       className="relative min-h-svh w-full overflow-hidden bg-[#eef4f8] text-slate-900"
     >
-      <canvas
-        ref={canvasRef}
-        aria-label="Color Infection arena. Move the mouse to preview, click or tap to set destination, press Space for shockwave, press D for diagnostics."
-        className="absolute inset-0 h-full w-full touch-none"
-        onPointerCancel={() => gameRef.current?.clearPointer()}
-        onPointerDown={handlePointerDown}
-        onPointerLeave={() => gameRef.current?.clearPointer()}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        role="application"
+      <PixiGameCanvas
+        debugVisible={debugVisible}
+        game={game}
+        onDebugStats={setDebugStats}
+        onStats={setStats}
       />
 
       <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-start justify-between gap-2 px-3 pt-4 sm:gap-4 sm:px-6">
@@ -541,7 +397,7 @@ export default function GameCanvas() {
       </div>
 
       {debugVisible && debugStats && (
-        <div className="pointer-events-none absolute left-3 top-28 z-30 w-[214px] rounded-lg border border-slate-900/10 bg-white/92 p-3 font-mono text-[11px] leading-5 text-slate-700 shadow-[0_18px_48px_rgba(38,55,77,0.14)] backdrop-blur-xl sm:left-5 sm:top-32">
+        <div className="pointer-events-none absolute left-3 top-28 z-30 w-[244px] rounded-lg border border-slate-900/10 bg-white/92 p-3 font-mono text-[11px] leading-5 text-slate-700 shadow-[0_18px_48px_rgba(38,55,77,0.14)] backdrop-blur-xl sm:left-5 sm:top-32">
           <div className="mb-1 flex items-center gap-2 font-sans text-xs font-semibold text-slate-900">
             <Bug className="size-4 text-slate-600" strokeWidth={2} />
             Diagnostics
@@ -551,10 +407,24 @@ export default function GameCanvas() {
             <span className="text-right">{debugStats.fps}</span>
             <span>Frame</span>
             <span className="text-right">{formatMetricMs(debugStats.frameMs)}</span>
+            <span>Peak 5s</span>
+            <span className="text-right">{formatMetricMs(debugStats.maxFrameMsLast5s)}</span>
             <span>Update</span>
             <span className="text-right">{formatMetricMs(debugStats.updateMs)}</span>
             <span>Draw</span>
             <span className="text-right">{formatMetricMs(debugStats.drawMs)}</span>
+            <span>Pixi Sync</span>
+            <span className="text-right">{formatMetricMs(debugStats.pixiSyncMs)}</span>
+            <span>Pulse CPU</span>
+            <span className="text-right">{formatMetricMs(debugStats.pulseProcessMs)}</span>
+            <span>Shock CPU</span>
+            <span className="text-right">{formatMetricMs(debugStats.lastShockwaveFrameCost)}</span>
+            <span>Shock Dots</span>
+            <span className="text-right">{debugStats.lastShockwaveDotsAffected}</span>
+            <span>Shock Parts</span>
+            <span className="text-right">{debugStats.lastShockwaveParticlesSpawned}</span>
+            <span>Pulse Queue</span>
+            <span className="text-right">{debugStats.activePulseQueueLength}</span>
             <span>Dots</span>
             <span className="text-right">{debugStats.dotCount}</span>
             <span>Ripples</span>
@@ -571,6 +441,16 @@ export default function GameCanvas() {
             <span className="text-right">
               {Math.round(debugStats.hazeScale * 100)}%/{debugStats.hazeEvery}f
             </span>
+            <span>Haze CPU</span>
+            <span className="text-right">{formatMetricMs(debugStats.hazeRebuildMs)}</span>
+            <span>Renderer</span>
+            <span className="truncate text-right">{debugStats.rendererType}</span>
+            <span>Stage</span>
+            <span className="text-right">{debugStats.stageChildren}</span>
+            <span>Sprites</span>
+            <span className="text-right">{debugStats.dotSpriteCount}</span>
+            <span>Pixi FX</span>
+            <span className="text-right">{debugStats.activeEffectObjectCount}</span>
           </div>
         </div>
       )}

@@ -1,10 +1,18 @@
 # Color Infection
 
-Color Infection is a web-based 2D canvas puzzle prototype built with Next.js App Router, TypeScript, React, HTML Canvas 2D, and Tailwind CSS.
+Color Infection is a web-based 2D territorial puzzle prototype built with Next.js App Router, TypeScript, React, PixiJS, and Tailwind CSS.
 
-## Version 1.03
+## Version 1.05
 
-This version adds staged level progression, enemy variants, arena modifiers, and a performance optimization pass focused on stable long-running canvas play.
+Version 1.05 is the PixiJS Phase 2 pulse and spike optimization pass. It preserves V1.04 gameplay, levels, enemies, HUD, controls, pause/reset, and diagnostics while making shockwaves, enemy pulses, node pulses, and collision rings cheaper and smoother.
+
+This version also fixes the node capture arc bug where a capture ring could draw a long diagonal line across the arena.
+
+The architecture is intentionally split:
+
+- `Game.ts` owns simulation state, level generation, dots, cores, infection, cleansing, enemy AI, collisions, nodes, modifiers, pulses, win/loss rules, pause/reset, and debug stats.
+- Pixi rendering owns the animated scene: application lifecycle, layers, textures, sprites, pooled visual effects, haze, resize handling, and cleanup.
+- React owns layout, HUD, pause/reset/shockwave buttons, level controls, mobile controls, keyboard shortcuts, and the diagnostics overlay.
 
 ### Current Gameplay
 
@@ -23,7 +31,7 @@ This version adds staged level progression, enemy variants, arena modifiers, and
 
 ### Level Structure
 
-The prototype now introduces mechanics gradually:
+The prototype introduces mechanics gradually:
 
 - Level 1, First Cleanse: no enemy core, only seeded infected dots.
 - Level 2, Pinned Core: a static enemy core infects nearby territory.
@@ -32,7 +40,7 @@ The prototype now introduces mechanics gradually:
 - Level 5, Pulse Pressure: enemy pulses and a light hunter escort enter play.
 - Level 6, Open War: nodes, walls, gates, energy wells, viscosity zones, and enemy variants combine.
 
-Use the bottom-left level control to step through levels.
+Use the level control to step through levels.
 
 ### Enemy Variants
 
@@ -42,11 +50,11 @@ Use the bottom-left level control to step through levels.
 - Splitter: breaks into smaller hunter-style infection cores when damaged.
 - Root: stationary; in advanced levels it creates branching infection pressure.
 
-Enemy AI still uses the four readable modes:
+Enemy AI still uses four readable modes:
 
 - `expand`: grows into neutral territory.
 - `contest`: pressures red/blue frontlines and weak blue frontier dots.
-- `defend`: retreats toward its own infected home when invaded.
+- `defend`: retreats toward its infected home when invaded.
 - `attack`: briefly pressures the player core, mostly from hunter-type enemies.
 
 ### Arena Modifiers
@@ -59,7 +67,7 @@ Enemy AI still uses the four readable modes:
 ### Active Ability
 
 - Press `Space` or use the shockwave UI button to fire the player shockwave.
-- Shockwave emits a large, fast cleansing pulse from the player core.
+- Shockwave emits a large, expanding cleansing pulse from the player core.
 - Using it drains 10% of current player territory and turns those dots neutral.
 - Standing in blue territory, owning nodes, and using energy wells improves recharge.
 
@@ -82,37 +90,84 @@ Enemy AI still uses the four readable modes:
   - under 5:00 = 1 star.
 - After 5:00, infection gradually becomes stronger, but the player can still win.
 
-### Performance Pass
+### PixiJS Renderer
 
-- Canvas internal resolution is capped at `Math.min(devicePixelRatio, 1.5)`.
-- The canvas keeps responsive CSS sizing while using `ctx.setTransform(dpr, 0, 0, dpr, 0, 0)`.
-- Red/blue territory haze now renders to a low-resolution offscreen canvas at 33% scale.
-- Haze updates every 4th frame and scales back to the main canvas.
-- Main dot rendering uses pre-rendered dot/core sprites instead of per-dot shadows and gradients.
-- Frontline haze is folded into the low-resolution haze pass, with only lightweight main-canvas flicker.
-- Effects are capped and cleaned in-place:
-  - `MAX_RIPPLES = 60`
+- `src/components/PixiGameCanvas.tsx` creates and destroys the Pixi app on the client.
+- Pixi's ticker is the single active game loop: it calls `game.update(dt)` and then `pixiRenderer.sync(game.getRenderState())`.
+- React receives throttled HUD/debug updates instead of updating state every frame.
+- Pointer behavior is preserved:
+  - pointer move previews destination on desktop,
+  - pointer down commits movement destination,
+  - touch/tap commits movement on mobile.
+- The old public Canvas 2D draw path is disabled for active gameplay; rendering is driven by Pixi snapshots from `Game.ts`.
+
+### Pixi Layers
+
+Pixi containers are kept simple and ordered for future upgrades:
+
+- `backgroundLayer`
+- `hazeLayer`
+- `territoryLayer`
+- `dotLayer`
+- `modifierLayer`
+- `nodeLayer`
+- `coreLayer`
+- `effectLayer`
+- `debugLayer`
+
+### Rendering And Performance
+
+- `pixi.js` is the active scene dependency.
+- Canvas resolution is capped at `Math.min(devicePixelRatio || 1, 1.5)`.
+- Pixi uses responsive CSS sizing with capped internal renderer resolution.
+- Dots use reusable Pixi sprites and small shared textures for neutral, infected, player, and contested states.
+- Dot sprites are created once per level/revision, then updated with position, scale, alpha, tint, texture, and visibility.
+- Cores render through Pixi sprites and lightweight graphics for aura, destination, and collision feedback.
+- Ripples, pulses, shockwaves, particles, and collision bursts are rendered with pooled Pixi display objects.
+- Pulse and ripple rings use a reusable pre-rendered Pixi ring texture instead of redrawing ring graphics every frame.
+- Shockwave, enemy pulse, and node pulse gameplay now runs as active pulse objects that expand over time.
+- Active pulses query dots through a spatial grid and process only newly reached ring-band dots.
+- Pulse processing is frame-budgeted:
+  - `MAX_PULSE_DOT_HITS_PER_FRAME = 80`
+  - `MAX_PULSE_PARTICLES_PER_FRAME = 40`
+- Shockwave particle bursts use sampling instead of spawning one particle per affected dot.
+- Effect caps are:
+  - `MAX_RIPPLES = 30`
   - `MAX_PARTICLES = 300`
-  - `MAX_PULSES = 20`
-- Temporary arrays no longer grow indefinitely.
+  - `MAX_PULSES = 10`
+- Territory haze is rendered to a low-resolution canvas texture at 33% scale.
+- Haze normally refreshes every 4th frame, and temporarily refreshes every 2nd frame while pulses are active.
+- Heavy full-screen blur filters and per-dot gradient creation are avoided in the main render loop.
 
 ### Debug Diagnostics
 
-Press `D` to toggle the debug overlay.
+Press `D` to toggle the diagnostics overlay.
 
 The overlay shows:
 
 - FPS,
 - frame time,
+- max frame time over the last 5 seconds,
 - update time,
-- draw time,
+- draw/render sync time,
+- Pixi sync time,
+- pulse processing time,
+- last shockwave frame cost,
+- dots affected by the last shockwave,
+- particles spawned by the last shockwave,
+- active pulse queue length,
 - dot count,
 - ripple count,
 - particle count,
 - pulse count,
 - active effect count,
 - capped DPR,
-- haze scale and update cadence.
+- haze scale and update cadence,
+- haze rebuild cost,
+- Pixi renderer type,
+- stage child count,
+- dot sprite count,
+- active Pixi effect object count.
 
 ### Visual Direction
 
@@ -120,15 +175,20 @@ The overlay shows:
 - Blue/cyan and red/orange haze makes territory ownership readable.
 - Gray/purple frontline flicker highlights contested zones.
 - Larger nodes, darker viscosity zones, walls, gates, and energy wells add tactical landmarks.
-- Mobile keeps a compact timer/ability/pause pill at the top and three circular stat indicators at the bottom.
+- Mobile keeps a compact timer/ability/pause cluster and bottom circular stat indicators.
 
 ### Main Files
 
 - `src/app/page.tsx` mounts the game.
-- `src/components/GameCanvas.tsx` owns the React canvas shell, HUD, level controls, debug overlay, pause/reset/shockwave controls, keyboard shortcuts, and pointer/touch input.
-- `src/lib/game/Game.ts` owns game state, level generation, enemy variants, arena modifiers, performance caches, sprites, pulses, collisions, nodes, viscosity, AI, infection/cleansing, pause, win/loss, and drawing.
-- `src/lib/game/Dot.ts` owns per-dot visual motion and influence response.
-- `src/lib/game/colors.ts` and `src/lib/game/math.ts` provide rendering and numeric helpers.
+- `src/components/GameCanvas.tsx` owns the React shell, HUD, level controls, debug overlay, pause/reset/shockwave controls, and keyboard shortcuts.
+- `src/components/PixiGameCanvas.tsx` mounts Pixi, forwards pointer/touch input, runs the Pixi ticker, and throttles React stats updates.
+- `src/lib/game/Game.ts` owns game state, simulation, level generation, AI, arena modifiers, collisions, effects state, pause, win/loss, debug stats, and render snapshots.
+- `src/lib/game/Dot.ts` owns per-dot state and visual motion data.
+- `src/lib/game/colors.ts` and `src/lib/game/math.ts` provide color and numeric helpers.
+- `src/lib/rendering/PixiRenderer.ts` syncs Pixi visuals from `GameRenderState`.
+- `src/lib/rendering/pixiTextures.ts` creates reusable Pixi textures.
+- `src/lib/rendering/pixiLayers.ts` creates the Pixi layer stack.
+- `src/lib/rendering/pixiEffects.ts` provides display-object pools for effects.
 
 ## Development
 

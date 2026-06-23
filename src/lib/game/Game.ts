@@ -1,27 +1,30 @@
 import { Dot, type DotState, type PointerField } from "./Dot";
-import { palette, rgba } from "./colors";
 import { clamp, distance, randomInt, randomRange, smoothstep } from "./math";
 
-type GameStatus = "playing" | "won" | "lost";
-type AgentKind = "player" | "enemy";
-type EnemyMode = "expand" | "contest" | "defend" | "attack";
-type EnemyType = "spreader" | "hunter" | "tank" | "splitter" | "root";
-type AgentType = "player" | EnemyType;
-type NodeOwner = "neutral" | AgentKind;
-type RippleColor = AgentKind | "shock" | "collision" | "node";
-type PulseKind = "shockwave" | "node" | "enemy";
-type BlockerKind = "wall" | "gate";
-type SpriteKey = "neutralDot" | "playerDot" | "infectedDot" | "contestedDot" | "playerCore" | "enemyCore";
+export type GameStatus = "playing" | "won" | "lost";
+export type AgentKind = "player" | "enemy";
+export type PulseOwner = AgentKind | "neutral";
+export type EnemyMode = "expand" | "contest" | "defend" | "attack";
+export type EnemyType = "spreader" | "hunter" | "tank" | "splitter" | "root";
+export type AgentType = "player" | EnemyType;
+export type NodeOwner = "neutral" | AgentKind;
+export type RippleColor = AgentKind | "shock" | "collision" | "node";
+export type PulseKind = "shockwave" | "node" | "enemy";
+export type BlockerKind = "wall" | "gate";
 
-const MAX_RIPPLES = 60;
-const MAX_PARTICLES = 300;
-const MAX_PULSES = 20;
+export const MAX_RIPPLES = 30;
+export const MAX_PARTICLES = 300;
+export const MAX_PULSES = 10;
+export const MAX_PULSE_DOT_HITS_PER_FRAME = 80;
+export const MAX_PULSE_PARTICLES_PER_FRAME = 40;
 const MAX_CONTESTED_ZONES = 18;
 const MAX_ENEMIES = 7;
-const HAZE_SCALE = 0.33;
-const HAZE_FRAME_INTERVAL = 4;
+const DOT_GRID_CELL_SIZE = 78;
+const SHOCKWAVE_DURATION = 2.85;
+export const HAZE_SCALE = 0.33;
+export const HAZE_FRAME_INTERVAL = 4;
 
-type Agent = {
+export type Agent = {
   id: number;
   kind: AgentKind;
   type: AgentType;
@@ -51,7 +54,7 @@ type Agent = {
   active: boolean;
 };
 
-type Arena = {
+export type Arena = {
   x: number;
   y: number;
   width: number;
@@ -61,7 +64,7 @@ type Arena = {
   radius: number;
 };
 
-type Ripple = {
+export type Ripple = {
   x: number;
   y: number;
   age: number;
@@ -70,19 +73,33 @@ type Ripple = {
   color: RippleColor;
 };
 
-type ActivePulse = {
+export type ActivePulse = {
+  id: number;
   x: number;
   y: number;
   age: number;
   duration: number;
+  lifetime: number;
+  currentRadius: number;
   previousRadius: number;
   maxRadius: number;
-  owner: AgentKind;
-  power: number;
+  speed: number;
+  strength: number;
+  owner: PulseOwner;
   kind: PulseKind;
+  processedDotIds: Set<number>;
+  processedEnemyIds: Set<number>;
+  pendingDotHits: PulseDotHit[];
+  dotsAffected: number;
+  particlesSpawned: number;
 };
 
-type ControlNode = {
+type PulseDotHit = {
+  id: number;
+  edge: number;
+};
+
+export type ControlNode = {
   id: number;
   x: number;
   y: number;
@@ -93,7 +110,7 @@ type ControlNode = {
   pulseTimer: number;
 };
 
-type ViscosityZone = {
+export type ViscosityZone = {
   x: number;
   y: number;
   radius: number;
@@ -101,7 +118,7 @@ type ViscosityZone = {
   phase: number;
 };
 
-type ArenaBlocker = {
+export type ArenaBlocker = {
   id: number;
   kind: BlockerKind;
   x: number;
@@ -111,7 +128,7 @@ type ArenaBlocker = {
   phase: number;
 };
 
-type EnergyWell = {
+export type EnergyWell = {
   id: number;
   x: number;
   y: number;
@@ -119,7 +136,7 @@ type EnergyWell = {
   phase: number;
 };
 
-type ContestedZone = {
+export type ContestedZone = {
   x: number;
   y: number;
   age: number;
@@ -127,7 +144,7 @@ type ContestedZone = {
   radius: number;
 };
 
-type Particle = {
+export type Particle = {
   x: number;
   y: number;
   vx: number;
@@ -213,6 +230,54 @@ export type GameDebugStats = {
   hazeEvery: number;
   enemyCount: number;
   level: number;
+  rendererType: string;
+  stageChildren: number;
+  dotSpriteCount: number;
+  activeParticleSpriteCount: number;
+  activeEffectObjectCount: number;
+  lastShockwaveFrameCost: number;
+  lastShockwaveDotsAffected: number;
+  lastShockwaveParticlesSpawned: number;
+  activePulseQueueLength: number;
+  maxFrameMsLast5s: number;
+  hazeRebuildMs: number;
+  pixiSyncMs: number;
+  pulseProcessMs: number;
+};
+
+export type PixiRenderMetrics = {
+  rendererType: string;
+  stageChildren: number;
+  dotSpriteCount: number;
+  activeParticleSpriteCount: number;
+  activeEffectObjectCount: number;
+  hazeRebuildMs: number;
+  hazeEvery: number;
+  pixiSyncMs: number;
+};
+
+export type GameRenderState = {
+  revision: number;
+  width: number;
+  height: number;
+  time: number;
+  arena: Arena;
+  dots: Dot[];
+  frontline: Float32Array;
+  player: Agent;
+  enemies: Agent[];
+  nodes: ControlNode[];
+  viscosityZones: ViscosityZone[];
+  blockers: ArenaBlocker[];
+  energyWells: EnergyWell[];
+  ripples: Ripple[];
+  pulses: ActivePulse[];
+  contestedZones: ContestedZone[];
+  particles: Particle[];
+  destination: { active: boolean; x: number; y: number; pulse: number };
+  preview: { active: boolean; x: number; y: number };
+  status: GameStatus;
+  paused: boolean;
 };
 
 const ENEMY_SETTINGS: Record<EnemyType, EnemySettings> = {
@@ -497,14 +562,21 @@ export class Game {
   private energyWells: EnergyWell[] = [];
   private contestedZones: ContestedZone[] = [];
   private particles: Particle[] = [];
+  private dotGrid = new Map<string, number[]>();
+  private pulseQueryBuffer: number[] = [];
+  private nextPulseId = 1;
+  private pulseProcessMs = 0;
+  private lastShockwaveFrameCost = 0;
+  private lastShockwaveDotsAffected = 0;
+  private lastShockwaveParticlesSpawned = 0;
+  private activePulseQueueLength = 0;
+  private frameMetricClock = 0;
+  private frameMetricWindow: Array<{ time: number; frameMs: number }> = [];
+  private maxFrameMsLast5s = 0;
   private time = 0;
   private collisionCooldown = 0;
   private shockwaveCharge = 1;
-  private sprites: Partial<Record<SpriteKey, HTMLCanvasElement>> = {};
-  private hazeCanvas: HTMLCanvasElement | null = null;
-  private hazeCtx: CanvasRenderingContext2D | null = null;
-  private hazeCountdown = 0;
-  private hazeDirty = true;
+  private renderRevision = 0;
   private debugStats: GameDebugStats = {
     fps: 0,
     frameMs: 0,
@@ -520,6 +592,19 @@ export class Game {
     hazeEvery: HAZE_FRAME_INTERVAL,
     enemyCount: 0,
     level: 1,
+    rendererType: "canvas2d",
+    stageChildren: 0,
+    dotSpriteCount: 0,
+    activeParticleSpriteCount: 0,
+    activeEffectObjectCount: 0,
+    lastShockwaveFrameCost: 0,
+    lastShockwaveDotsAffected: 0,
+    lastShockwaveParticlesSpawned: 0,
+    activePulseQueueLength: 0,
+    maxFrameMsLast5s: 0,
+    hazeRebuildMs: 0,
+    pixiSyncMs: 0,
+    pulseProcessMs: 0,
   };
 
   resize(width: number, height: number) {
@@ -533,7 +618,6 @@ export class Game {
     this.width = nextWidth;
     this.height = nextHeight;
     this.updateArena();
-    this.invalidateHaze();
 
     if (shouldReset) {
       this.reset();
@@ -553,9 +637,16 @@ export class Game {
     this.pulses = [];
     this.contestedZones = [];
     this.particles = [];
+    this.pulseProcessMs = 0;
+    this.lastShockwaveFrameCost = 0;
+    this.lastShockwaveDotsAffected = 0;
+    this.lastShockwaveParticlesSpawned = 0;
+    this.activePulseQueueLength = 0;
+    this.frameMetricClock = 0;
+    this.frameMetricWindow = [];
+    this.maxFrameMsLast5s = 0;
     this.destination.active = false;
     this.preview.active = false;
-    this.invalidateHaze();
     this.buildLevel();
   }
 
@@ -628,13 +719,16 @@ export class Game {
 
     this.sacrificePlayerTerritory();
     this.shockwaveCharge = 0;
+    this.lastShockwaveFrameCost = 0;
+    this.lastShockwaveDotsAffected = 0;
+    this.lastShockwaveParticlesSpawned = 0;
     this.addPulse({
       x: this.player.x,
       y: this.player.y,
       owner: "player",
-      maxRadius: Math.max(this.arena.width, this.arena.height) * 0.92,
-      duration: 0.72,
-      power: 0.34,
+      maxRadius: this.getShockwaveMaxRadius(),
+      duration: SHOCKWAVE_DURATION,
+      strength: 0.34,
       kind: "shockwave",
     });
     this.addRipple(this.player.x, this.player.y, "shock", 110);
@@ -668,7 +762,6 @@ export class Game {
       this.resolveStates();
       this.updateFrontlines();
       this.checkOutcome();
-      this.hazeDirty = true;
     }
 
     this.updateRipples(safeDt);
@@ -680,37 +773,17 @@ export class Game {
     }
   }
 
-  draw(ctx: CanvasRenderingContext2D) {
-    this.ensureSprites();
-    ctx.clearRect(0, 0, this.width, this.height);
-    this.drawOuterBackground(ctx);
-    this.drawArenaBase(ctx);
-
-    ctx.save();
-    this.arenaPath(ctx, this.arena.radius);
-    ctx.clip();
-    this.drawViscosityZones(ctx);
-    this.drawEnergyWells(ctx);
-    this.drawTerritoryHaze(ctx);
-    this.drawFrontlines(ctx);
-    this.drawAgentFields(ctx);
-    this.drawNodes(ctx);
-    this.drawRipples(ctx);
-    this.drawPulses(ctx);
-    this.drawDots(ctx);
-    this.drawParticles(ctx);
-    this.drawDestination(ctx);
-    this.drawBlockers(ctx);
-    this.drawAgents(ctx);
-    ctx.restore();
-
-    this.drawArenaFrame(ctx);
-  }
-
-  recordFrameMetrics(frameMs: number, updateMs: number, drawMs: number, dpr: number) {
+  recordFrameMetrics(
+    frameMs: number,
+    updateMs: number,
+    drawMs: number,
+    dpr: number,
+    pixiMetrics?: PixiRenderMetrics,
+  ) {
     const fps = frameMs > 0 ? 1000 / frameMs : 0;
     const activeEffectCount =
       this.ripples.length + this.particles.length + this.pulses.length + this.contestedZones.length;
+    this.trackFrameWindow(frameMs);
 
     this.debugStats = {
       fps: Math.round(fps),
@@ -724,14 +797,65 @@ export class Game {
       activeEffectCount,
       dpr,
       hazeScale: HAZE_SCALE,
-      hazeEvery: HAZE_FRAME_INTERVAL,
+      hazeEvery: pixiMetrics?.hazeEvery ?? HAZE_FRAME_INTERVAL,
       enemyCount: this.getActiveEnemies().length,
       level: this.levelConfig.number,
+      rendererType: pixiMetrics?.rendererType ?? "canvas2d",
+      stageChildren: pixiMetrics?.stageChildren ?? 0,
+      dotSpriteCount: pixiMetrics?.dotSpriteCount ?? this.dots.length,
+      activeParticleSpriteCount: pixiMetrics?.activeParticleSpriteCount ?? this.particles.length,
+      activeEffectObjectCount: pixiMetrics?.activeEffectObjectCount ?? activeEffectCount,
+      lastShockwaveFrameCost: this.lastShockwaveFrameCost,
+      lastShockwaveDotsAffected: this.lastShockwaveDotsAffected,
+      lastShockwaveParticlesSpawned: this.lastShockwaveParticlesSpawned,
+      activePulseQueueLength: this.activePulseQueueLength,
+      maxFrameMsLast5s: this.maxFrameMsLast5s,
+      hazeRebuildMs: pixiMetrics?.hazeRebuildMs ?? 0,
+      pixiSyncMs: pixiMetrics?.pixiSyncMs ?? drawMs,
+      pulseProcessMs: this.pulseProcessMs,
     };
   }
 
   getDebugStats(): GameDebugStats {
     return this.debugStats;
+  }
+
+  private trackFrameWindow(frameMs: number) {
+    this.frameMetricClock += frameMs / 1000;
+    this.frameMetricWindow.push({ time: this.frameMetricClock, frameMs });
+
+    const cutoff = this.frameMetricClock - 5;
+    while (this.frameMetricWindow.length > 0 && this.frameMetricWindow[0].time < cutoff) {
+      this.frameMetricWindow.shift();
+    }
+
+    this.maxFrameMsLast5s = this.frameMetricWindow.reduce((max, sample) => Math.max(max, sample.frameMs), 0);
+  }
+
+  getRenderState(): GameRenderState {
+    return {
+      revision: this.renderRevision,
+      width: this.width,
+      height: this.height,
+      time: this.time,
+      arena: this.arena,
+      dots: this.dots,
+      frontline: this.frontline,
+      player: this.player,
+      enemies: this.getActiveEnemies(),
+      nodes: this.nodes,
+      viscosityZones: this.viscosityZones,
+      blockers: this.blockers,
+      energyWells: this.energyWells,
+      ripples: this.ripples,
+      pulses: this.pulses,
+      contestedZones: this.contestedZones,
+      particles: this.particles,
+      destination: this.destination,
+      preview: this.preview,
+      status: this.status,
+      paused: this.paused,
+    };
   }
 
   getStats(): GameStats {
@@ -872,6 +996,7 @@ export class Game {
     this.playerExposure = new Float32Array(dots.length);
     this.dotViscosity = new Float32Array(dots.length);
     this.frontline = new Float32Array(dots.length);
+    this.rebuildDotGrid();
 
     for (const dot of this.dots) {
       this.dotViscosity[dot.id] = this.getViscosityAt(dot.baseX, dot.baseY);
@@ -889,7 +1014,7 @@ export class Game {
     this.seedInfectionSources(config.infectionSources, Math.max(actualSpacingX, actualSpacingY));
     this.updateFields();
     this.updateFrontlines();
-    this.invalidateHaze();
+    this.renderRevision += 1;
   }
 
   private placeAgents() {
@@ -1619,8 +1744,8 @@ export class Game {
       y: node.y,
       owner: isPlayer ? "player" : "enemy",
       maxRadius: radius,
-      duration: 0.82,
-      power: isPlayer ? 0.24 : 0.21,
+      duration: 1.45,
+      strength: isPlayer ? 0.24 : 0.21,
       kind: "node",
     });
     this.addRipple(node.x, node.y, isPlayer ? "player" : "enemy", radius);
@@ -1653,8 +1778,8 @@ export class Game {
       y: enemy.y,
       owner: "enemy",
       maxRadius: radius,
-      duration: 0.88,
-      power,
+      duration: 1.55,
+      strength: power,
       kind: "enemy",
     });
     this.addRipple(enemy.x, enemy.y, "enemy", radius * 0.76);
@@ -1696,55 +1821,146 @@ export class Game {
   }
 
   private updatePulses(dt: number) {
+    const started = typeof performance !== "undefined" ? performance.now() : 0;
+    let dotBudget = MAX_PULSE_DOT_HITS_PER_FRAME;
+    let particleBudget = MAX_PULSE_PARTICLES_PER_FRAME;
+    let shockwaveProcessedThisFrame = false;
+
     for (let index = this.pulses.length - 1; index >= 0; index -= 1) {
       const pulse = this.pulses[index];
       pulse.age += dt;
-      const progress = clamp(pulse.age / pulse.duration, 0, 1);
-      const radius = progress * pulse.maxRadius;
 
-      this.applyPulse(pulse, pulse.previousRadius, radius);
-      pulse.previousRadius = radius;
+      if (pulse.currentRadius < pulse.maxRadius) {
+        pulse.previousRadius = pulse.currentRadius;
+        pulse.currentRadius = Math.min(pulse.maxRadius, pulse.currentRadius + pulse.speed * dt);
+        this.queuePulseDotHits(pulse);
+        this.applyPulseToEnemies(pulse);
+      } else {
+        pulse.previousRadius = pulse.currentRadius;
+      }
 
-      if (pulse.age >= pulse.duration) {
+      while (pulse.pendingDotHits.length > 0 && dotBudget > 0) {
+        const hit = pulse.pendingDotHits.shift();
+
+        if (!hit) {
+          break;
+        }
+
+        const spawnedParticle = this.applyPulseDotHit(pulse, hit, particleBudget > 0);
+        pulse.dotsAffected += 1;
+        dotBudget -= 1;
+
+        if (spawnedParticle) {
+          pulse.particlesSpawned += 1;
+          particleBudget -= 1;
+        }
+      }
+
+      if (pulse.kind === "shockwave") {
+        shockwaveProcessedThisFrame = true;
+        this.lastShockwaveDotsAffected = pulse.dotsAffected;
+        this.lastShockwaveParticlesSpawned = pulse.particlesSpawned;
+      }
+
+      if (pulse.currentRadius >= pulse.maxRadius && pulse.pendingDotHits.length === 0 && pulse.age >= pulse.lifetime) {
         this.pulses.splice(index, 1);
       }
     }
+
+    this.activePulseQueueLength = this.pulses.reduce((total, pulse) => total + pulse.pendingDotHits.length, 0);
+    this.pulseProcessMs = started > 0 ? performance.now() - started : 0;
+
+    if (shockwaveProcessedThisFrame) {
+      this.lastShockwaveFrameCost = this.pulseProcessMs;
+    }
   }
 
-  private applyPulse(pulse: ActivePulse, previousRadius: number, radius: number) {
-    const band = pulse.kind === "shockwave" ? 46 : 34;
+  private queuePulseDotHits(pulse: ActivePulse) {
+    const band = this.getPulseBand(pulse);
+    const innerRadius = Math.max(0, pulse.previousRadius - band);
+    const outerRadius = Math.min(pulse.maxRadius + band, pulse.currentRadius + band);
+    const candidates = this.queryDotsInRadius(pulse.x, pulse.y, outerRadius, innerRadius, this.pulseQueryBuffer);
 
-    for (const dot of this.dots) {
-      const waveDistance = dot.distanceTo(pulse.x, pulse.y);
-
-      if (waveDistance < previousRadius - band || waveDistance > radius + band) {
+    for (const dotId of candidates) {
+      if (pulse.processedDotIds.has(dotId)) {
         continue;
       }
 
-      const edge = 1 - clamp(Math.abs(waveDistance - radius) / band, 0, 1);
-      const power = edge * pulse.power;
+      const dot = this.dots[dotId];
+      const waveDistance = dot.distanceTo(pulse.x, pulse.y);
+      const edge = 1 - clamp(Math.abs(waveDistance - pulse.currentRadius) / band, 0, 1);
 
-      if (pulse.owner === "player") {
-        dot.infectionAmount = clamp(dot.infectionAmount - power, 0, 1);
-        dot.playerAmount = clamp(dot.playerAmount + power * 0.92, 0, 1);
-      } else {
-        dot.infectionAmount = clamp(dot.infectionAmount + power, 0, 1);
-        dot.playerAmount = clamp(dot.playerAmount - power * 0.7, 0, 1);
+      if (edge <= 0.02) {
+        continue;
       }
+
+      pulse.processedDotIds.add(dotId);
+      pulse.pendingDotHits.push({ id: dotId, edge });
     }
+  }
+
+  private applyPulseDotHit(pulse: ActivePulse, hit: PulseDotHit, canSpawnParticle: boolean) {
+    const dot = this.dots[hit.id];
+    const power = hit.edge * pulse.strength;
 
     if (pulse.owner === "player") {
-      for (const enemy of this.getActiveEnemies()) {
-        const waveDistance = distance(pulse.x, pulse.y, enemy.x, enemy.y);
-
-        if (waveDistance < previousRadius - band || waveDistance > radius + band) {
-          continue;
-        }
-
-        const edge = 1 - clamp(Math.abs(waveDistance - radius) / band, 0, 1);
-        this.damageEnemy(enemy, edge * (pulse.kind === "shockwave" ? 0.42 : 0.18));
-      }
+      dot.infectionAmount = clamp(dot.infectionAmount - power, 0, 1);
+      dot.playerAmount = clamp(dot.playerAmount + power * 0.92, 0, 1);
+    } else if (pulse.owner === "enemy") {
+      dot.infectionAmount = clamp(dot.infectionAmount + power, 0, 1);
+      dot.playerAmount = clamp(dot.playerAmount - power * 0.7, 0, 1);
     }
+
+    if (!canSpawnParticle || pulse.owner === "neutral") {
+      return false;
+    }
+
+    const chance =
+      pulse.kind === "shockwave"
+        ? 0.1 + hit.edge * 0.12
+        : pulse.kind === "node"
+          ? 0.04 + hit.edge * 0.08
+          : 0.035 + hit.edge * 0.07;
+
+    if (Math.random() > chance) {
+      return false;
+    }
+
+    this.addParticle(dot.x, dot.y, pulse.owner, pulse.kind === "shockwave" ? 1.45 : 1.16);
+    return true;
+  }
+
+  private applyPulseToEnemies(pulse: ActivePulse) {
+    if (pulse.owner !== "player") {
+      return;
+    }
+
+    const band = this.getPulseBand(pulse);
+
+    for (const enemy of this.getActiveEnemies()) {
+      if (pulse.processedEnemyIds.has(enemy.id)) {
+        continue;
+      }
+
+      const waveDistance = distance(pulse.x, pulse.y, enemy.x, enemy.y);
+
+      if (waveDistance < pulse.previousRadius - band || waveDistance > pulse.currentRadius + band) {
+        continue;
+      }
+
+      const edge = 1 - clamp(Math.abs(waveDistance - pulse.currentRadius) / band, 0, 1);
+
+      if (edge <= 0.02) {
+        continue;
+      }
+
+      pulse.processedEnemyIds.add(enemy.id);
+      this.damageEnemy(enemy, edge * (pulse.kind === "shockwave" ? 0.42 : 0.18));
+    }
+  }
+
+  private getPulseBand(pulse: ActivePulse) {
+    return pulse.kind === "shockwave" ? 48 : 34;
   }
 
   private cleanseWithPlayer(dt: number) {
@@ -2165,32 +2381,49 @@ export class Game {
     owner,
     maxRadius,
     duration,
-    power,
+    strength,
     kind,
   }: {
     x: number;
     y: number;
-    owner: AgentKind;
+    owner: PulseOwner;
     maxRadius: number;
     duration: number;
-    power: number;
+    strength: number;
     kind: PulseKind;
   }) {
     while (this.pulses.length >= MAX_PULSES) {
       this.pulses.shift();
     }
 
+    const lifetime = Math.max(0.4, duration);
+
     this.pulses.push({
+      id: this.nextPulseId,
       x,
       y,
       age: 0,
-      duration,
+      duration: lifetime,
+      lifetime,
+      currentRadius: 0,
       previousRadius: 0,
       maxRadius,
+      speed: maxRadius / lifetime,
       owner,
-      power,
+      strength,
       kind,
+      processedDotIds: new Set<number>(),
+      processedEnemyIds: new Set<number>(),
+      pendingDotHits: [],
+      dotsAffected: 0,
+      particlesSpawned: 0,
     });
+    this.nextPulseId += 1;
+  }
+
+  private getShockwaveMaxRadius() {
+    const arenaRadius = Math.max(this.arena.width, this.arena.height) * 0.52;
+    return this.width < 720 ? clamp(arenaRadius, 260, 390) : clamp(arenaRadius, 480, 760);
   }
 
   private addRipple(x: number, y: number, color: Ripple["color"], radius = randomRange(28, 64)) {
@@ -2240,6 +2473,58 @@ export class Game {
       duration: 1.7,
       radius,
     });
+  }
+
+  private rebuildDotGrid() {
+    this.dotGrid.clear();
+
+    for (const dot of this.dots) {
+      const key = this.getDotGridKey(dot.baseX, dot.baseY);
+      const bucket = this.dotGrid.get(key);
+
+      if (bucket) {
+        bucket.push(dot.id);
+      } else {
+        this.dotGrid.set(key, [dot.id]);
+      }
+    }
+  }
+
+  private queryDotsInRadius(x: number, y: number, outerRadius: number, innerRadius: number, out: number[]) {
+    out.length = 0;
+    const minCellX = Math.floor((x - outerRadius) / DOT_GRID_CELL_SIZE);
+    const maxCellX = Math.floor((x + outerRadius) / DOT_GRID_CELL_SIZE);
+    const minCellY = Math.floor((y - outerRadius) / DOT_GRID_CELL_SIZE);
+    const maxCellY = Math.floor((y + outerRadius) / DOT_GRID_CELL_SIZE);
+    const outerRadiusSq = outerRadius * outerRadius;
+    const innerRadiusSq = innerRadius * innerRadius;
+
+    for (let cellY = minCellY; cellY <= maxCellY; cellY += 1) {
+      for (let cellX = minCellX; cellX <= maxCellX; cellX += 1) {
+        const bucket = this.dotGrid.get(`${cellX}:${cellY}`);
+
+        if (!bucket) {
+          continue;
+        }
+
+        for (const dotId of bucket) {
+          const dot = this.dots[dotId];
+          const dx = dot.baseX - x;
+          const dy = dot.baseY - y;
+          const distanceSq = dx * dx + dy * dy;
+
+          if (distanceSq >= innerRadiusSq && distanceSq <= outerRadiusSq) {
+            out.push(dotId);
+          }
+        }
+      }
+    }
+
+    return out;
+  }
+
+  private getDotGridKey(x: number, y: number) {
+    return `${Math.floor(x / DOT_GRID_CELL_SIZE)}:${Math.floor(y / DOT_GRID_CELL_SIZE)}`;
   }
 
   private sampleInfluence(x: number, y: number, radius: number): InfluenceSample {
@@ -2375,634 +2660,5 @@ export class Game {
       x: clamp(x, this.arena.x + padding, this.arena.right - padding),
       y: clamp(y, this.arena.y + padding, this.arena.bottom - padding),
     };
-  }
-
-  private invalidateHaze() {
-    this.hazeDirty = true;
-    this.hazeCountdown = 0;
-  }
-
-  private ensureSprites() {
-    if (this.sprites.neutralDot || typeof document === "undefined") {
-      return;
-    }
-
-    this.sprites.neutralDot = this.createSprite(38, (ctx, size) => {
-      const center = size / 2;
-      const glow = ctx.createRadialGradient(center, center, 0, center, center, center);
-      glow.addColorStop(0, "rgba(154, 163, 178, 0.54)");
-      glow.addColorStop(0.42, "rgba(154, 163, 178, 0.28)");
-      glow.addColorStop(1, "rgba(154, 163, 178, 0)");
-      ctx.fillStyle = glow;
-      ctx.fillRect(0, 0, size, size);
-      ctx.fillStyle = "rgba(125, 137, 154, 0.58)";
-      ctx.beginPath();
-      ctx.arc(center, center, size * 0.12, 0, Math.PI * 2);
-      ctx.fill();
-    });
-
-    this.sprites.playerDot = this.createDotSprite(palette.playerHot, palette.player);
-    this.sprites.infectedDot = this.createDotSprite(palette.infectedHot, palette.infected);
-    this.sprites.contestedDot = this.createDotSprite({ r: 148, g: 126, b: 176 }, { r: 99, g: 106, b: 122 });
-    this.sprites.playerCore = this.createCoreSprite(palette.playerHot, palette.player);
-    this.sprites.enemyCore = this.createCoreSprite(palette.infectedHot, palette.infected);
-  }
-
-  private createDotSprite(hot: typeof palette.playerHot, edge: typeof palette.player) {
-    return this.createSprite(52, (ctx, size) => {
-      const center = size / 2;
-      const glow = ctx.createRadialGradient(center, center, 0, center, center, center);
-      glow.addColorStop(0, rgba(hot, 0.58));
-      glow.addColorStop(0.42, rgba(edge, 0.24));
-      glow.addColorStop(1, rgba(edge, 0));
-      ctx.fillStyle = glow;
-      ctx.fillRect(0, 0, size, size);
-      ctx.fillStyle = rgba(edge, 0.92);
-      ctx.beginPath();
-      ctx.arc(center, center, size * 0.13, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "rgba(255, 255, 255, 0.58)";
-      ctx.beginPath();
-      ctx.arc(center - size * 0.04, center - size * 0.05, size * 0.045, 0, Math.PI * 2);
-      ctx.fill();
-    });
-  }
-
-  private createCoreSprite(hot: typeof palette.playerHot, edge: typeof palette.player) {
-    return this.createSprite(128, (ctx, size) => {
-      const center = size / 2;
-      const field = ctx.createRadialGradient(center, center, 0, center, center, center);
-      field.addColorStop(0, rgba(hot, 0.5));
-      field.addColorStop(0.46, rgba(edge, 0.2));
-      field.addColorStop(1, rgba(edge, 0));
-      ctx.fillStyle = field;
-      ctx.fillRect(0, 0, size, size);
-
-      const body = ctx.createRadialGradient(center - size * 0.12, center - size * 0.14, 0, center, center, size * 0.24);
-      body.addColorStop(0, "rgba(255, 255, 255, 0.94)");
-      body.addColorStop(0.46, rgba(hot, 0.92));
-      body.addColorStop(1, rgba(edge, 0.96));
-      ctx.fillStyle = body;
-      ctx.beginPath();
-      ctx.arc(center, center, size * 0.22, 0, Math.PI * 2);
-      ctx.fill();
-    });
-  }
-
-  private createSprite(size: number, draw: (ctx: CanvasRenderingContext2D, size: number) => void) {
-    const canvas = document.createElement("canvas");
-    canvas.width = size;
-    canvas.height = size;
-    const ctx = canvas.getContext("2d");
-
-    if (ctx) {
-      draw(ctx, size);
-    }
-
-    return canvas;
-  }
-
-  private ensureHazeCanvas() {
-    if (typeof document === "undefined") {
-      return null;
-    }
-
-    const width = Math.max(1, Math.ceil(this.width * HAZE_SCALE));
-    const height = Math.max(1, Math.ceil(this.height * HAZE_SCALE));
-
-    if (!this.hazeCanvas) {
-      this.hazeCanvas = document.createElement("canvas");
-      this.hazeCtx = this.hazeCanvas.getContext("2d", { alpha: true });
-    }
-
-    if (this.hazeCanvas.width !== width || this.hazeCanvas.height !== height) {
-      this.hazeCanvas.width = width;
-      this.hazeCanvas.height = height;
-      this.invalidateHaze();
-    }
-
-    return this.hazeCanvas;
-  }
-
-  private renderHaze() {
-    const canvas = this.ensureHazeCanvas();
-    const ctx = this.hazeCtx;
-
-    if (!canvas || !ctx) {
-      return;
-    }
-
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.setTransform(HAZE_SCALE, 0, 0, HAZE_SCALE, 0, 0);
-
-    for (const dot of this.dots) {
-      if (dot.infectionAmount > 0.08) {
-        const radius = 18 + dot.infectionAmount * 46;
-        const glow = ctx.createRadialGradient(dot.x, dot.y, 0, dot.x, dot.y, radius);
-        glow.addColorStop(0, rgba(palette.infectedHot, dot.infectionAmount * 0.15));
-        glow.addColorStop(0.62, rgba(palette.infected, dot.infectionAmount * 0.065));
-        glow.addColorStop(1, "rgba(255, 255, 255, 0)");
-        ctx.fillStyle = glow;
-        ctx.beginPath();
-        ctx.arc(dot.x, dot.y, radius, 0, Math.PI * 2);
-        ctx.fill();
-      }
-
-      if (dot.playerAmount > 0.08) {
-        const radius = 18 + dot.playerAmount * 48;
-        const glow = ctx.createRadialGradient(dot.x, dot.y, 0, dot.x, dot.y, radius);
-        glow.addColorStop(0, rgba(palette.playerHot, dot.playerAmount * 0.145));
-        glow.addColorStop(0.65, rgba(palette.player, dot.playerAmount * 0.06));
-        glow.addColorStop(1, "rgba(255, 255, 255, 0)");
-        ctx.fillStyle = glow;
-        ctx.beginPath();
-        ctx.arc(dot.x, dot.y, radius, 0, Math.PI * 2);
-        ctx.fill();
-      }
-
-      const frontline = this.frontline[dot.id] ?? 0;
-
-      if (frontline > 0.12) {
-        const radius = 14 + frontline * 28;
-        const flicker = 0.72 + Math.sin(this.time * 8 + dot.id) * 0.18;
-        const haze = ctx.createRadialGradient(dot.x, dot.y, 0, dot.x, dot.y, radius);
-        haze.addColorStop(0, `rgba(126, 106, 158, ${frontline * 0.18 * flicker})`);
-        haze.addColorStop(1, "rgba(126, 106, 158, 0)");
-        ctx.fillStyle = haze;
-        ctx.beginPath();
-        ctx.arc(dot.x, dot.y, radius, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
-  }
-
-  private drawOuterBackground(ctx: CanvasRenderingContext2D) {
-    const background = ctx.createLinearGradient(0, 0, 0, this.height);
-    background.addColorStop(0, "#f5f8fb");
-    background.addColorStop(1, "#edf4f8");
-    ctx.fillStyle = background;
-    ctx.fillRect(0, 0, this.width, this.height);
-  }
-
-  private drawArenaBase(ctx: CanvasRenderingContext2D) {
-    ctx.save();
-    ctx.shadowColor = "rgba(82, 104, 130, 0.14)";
-    ctx.shadowBlur = 32;
-    ctx.shadowOffsetY = 16;
-    this.arenaPath(ctx, this.arena.radius);
-    const arenaFill = ctx.createLinearGradient(0, this.arena.y, 0, this.arena.bottom);
-    arenaFill.addColorStop(0, palette.backgroundTop);
-    arenaFill.addColorStop(1, palette.backgroundBottom);
-    ctx.fillStyle = arenaFill;
-    ctx.fill();
-    ctx.restore();
-  }
-
-  private drawViscosityZones(ctx: CanvasRenderingContext2D) {
-    ctx.save();
-
-    for (const zone of this.viscosityZones) {
-      const pulse = 0.9 + Math.sin(this.time * 0.9 + zone.phase) * 0.08;
-      const radius = zone.radius * pulse;
-      const fill = ctx.createRadialGradient(zone.x, zone.y, 0, zone.x, zone.y, radius);
-      fill.addColorStop(0, `rgba(71, 85, 105, ${0.12 * zone.strength})`);
-      fill.addColorStop(0.58, `rgba(71, 85, 105, ${0.07 * zone.strength})`);
-      fill.addColorStop(1, "rgba(71, 85, 105, 0)");
-      ctx.fillStyle = fill;
-      ctx.beginPath();
-      ctx.arc(zone.x, zone.y, radius, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    ctx.restore();
-  }
-
-  private drawEnergyWells(ctx: CanvasRenderingContext2D) {
-    ctx.save();
-
-    for (const well of this.energyWells) {
-      const pulse = 1 + Math.sin(this.time * 2.2 + well.phase) * 0.08;
-      const radius = well.radius * pulse;
-      ctx.fillStyle = "rgba(82, 219, 232, 0.09)";
-      ctx.beginPath();
-      ctx.arc(well.x, well.y, radius * 1.75, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = "rgba(30, 174, 233, 0.38)";
-      ctx.lineWidth = 1.6;
-      ctx.beginPath();
-      ctx.arc(well.x, well.y, radius, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.fillStyle = "rgba(86, 219, 232, 0.5)";
-      ctx.beginPath();
-      ctx.arc(well.x, well.y, Math.max(3, radius * 0.14), 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    ctx.restore();
-  }
-
-  private drawTerritoryHaze(ctx: CanvasRenderingContext2D) {
-    if (this.hazeDirty && this.hazeCountdown <= 0) {
-      this.renderHaze();
-      this.hazeDirty = false;
-      this.hazeCountdown = HAZE_FRAME_INTERVAL;
-    } else {
-      this.hazeCountdown = Math.max(0, this.hazeCountdown - 1);
-    }
-
-    const canvas = this.hazeCanvas;
-
-    if (!canvas) {
-      return;
-    }
-
-    ctx.save();
-    ctx.imageSmoothingEnabled = true;
-    ctx.drawImage(canvas, 0, 0, this.width, this.height);
-    ctx.restore();
-  }
-
-  private drawFrontlines(ctx: CanvasRenderingContext2D) {
-    ctx.save();
-
-    for (const dot of this.dots) {
-      const frontline = this.frontline[dot.id] ?? 0;
-
-      if (frontline < 0.22) {
-        continue;
-      }
-
-      const flicker = 0.65 + Math.sin(this.time * 9 + dot.id) * 0.35;
-      ctx.fillStyle = `rgba(128, 105, 160, ${frontline * 0.22 * flicker})`;
-      ctx.beginPath();
-      ctx.arc(dot.x, dot.y, dot.radius + 2 + frontline * 2.2, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    ctx.restore();
-  }
-
-  private drawContestedZones(ctx: CanvasRenderingContext2D) {
-    ctx.save();
-
-    for (const zone of this.contestedZones) {
-      const progress = zone.age / zone.duration;
-      const alpha = (1 - progress) * 0.2;
-      const radius = zone.radius * (0.55 + progress * 0.5);
-      const haze = ctx.createRadialGradient(zone.x, zone.y, 0, zone.x, zone.y, radius);
-      haze.addColorStop(0, `rgba(98, 111, 129, ${alpha})`);
-      haze.addColorStop(1, "rgba(98, 111, 129, 0)");
-      ctx.fillStyle = haze;
-      ctx.beginPath();
-      ctx.arc(zone.x, zone.y, radius, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    ctx.restore();
-  }
-
-  private drawAgentFields(ctx: CanvasRenderingContext2D) {
-    for (const enemy of this.getActiveEnemies()) {
-      this.drawSoftField(ctx, enemy.x, enemy.y, enemy.fieldRadius * 1.02, "enemy", enemy.intensity * 0.9);
-    }
-
-    this.drawSoftField(ctx, this.player.x, this.player.y, this.player.fieldRadius * 1.08, "player", this.player.intensity);
-    this.drawContestedZones(ctx);
-  }
-
-  private drawSoftField(
-    ctx: CanvasRenderingContext2D,
-    x: number,
-    y: number,
-    radius: number,
-    kind: AgentKind,
-    intensity: number,
-  ) {
-    const color = kind === "player" ? palette.playerHot : palette.infectedHot;
-    const edge = kind === "player" ? palette.player : palette.infected;
-    const field = ctx.createRadialGradient(x, y, 0, x, y, radius);
-    field.addColorStop(0, rgba(color, 0.2 * intensity));
-    field.addColorStop(0.36, rgba(edge, 0.1 * intensity));
-    field.addColorStop(1, "rgba(255, 255, 255, 0)");
-    ctx.fillStyle = field;
-    ctx.beginPath();
-    ctx.arc(x, y, radius, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  private drawNodes(ctx: CanvasRenderingContext2D) {
-    ctx.save();
-
-    for (const node of this.nodes) {
-      const ownerColor =
-        node.owner === "player"
-          ? palette.playerHot
-          : node.owner === "enemy"
-            ? palette.infectedHot
-            : palette.neutral;
-      const pulse = 1 + Math.sin(this.time * 2.4 + node.id) * 0.08;
-      const radius = node.radius * pulse;
-
-      ctx.fillStyle = rgba(ownerColor, node.owner === "neutral" ? 0.42 : 0.88);
-      ctx.beginPath();
-      ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = "rgba(255, 255, 255, 0.82)";
-      ctx.beginPath();
-      ctx.arc(node.x, node.y, radius + 4, 0, Math.PI * 2);
-      ctx.stroke();
-
-      if (node.captureBy) {
-        ctx.strokeStyle = rgba(node.captureBy === "player" ? palette.playerHot : palette.infectedHot, 0.86);
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.arc(node.x, node.y, radius + 8, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * node.captureProgress);
-        ctx.stroke();
-      }
-    }
-
-    ctx.restore();
-  }
-
-  private drawBlockers(ctx: CanvasRenderingContext2D) {
-    ctx.save();
-
-    for (const blocker of this.blockers) {
-      const open = blocker.kind === "gate" ? blocker.openProgress : 0;
-      const radius = blocker.kind === "gate" ? blocker.radius * (1 - open * 0.18) : blocker.radius;
-
-      ctx.fillStyle =
-        blocker.kind === "gate"
-          ? `rgba(79, 94, 112, ${0.22 * (1 - open) + 0.05})`
-          : "rgba(83, 96, 113, 0.18)";
-      ctx.beginPath();
-      ctx.arc(blocker.x, blocker.y, radius, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.strokeStyle =
-        blocker.kind === "gate"
-          ? `rgba(30, 174, 233, ${0.2 + open * 0.48})`
-          : "rgba(83, 96, 113, 0.22)";
-      ctx.lineWidth = blocker.kind === "gate" ? 2.2 : 1.2;
-      ctx.beginPath();
-      ctx.arc(blocker.x, blocker.y, radius + 3, 0, Math.PI * 2);
-      ctx.stroke();
-
-      if (blocker.kind === "gate" && open > 0.08) {
-        ctx.strokeStyle = `rgba(86, 219, 232, ${open * 0.5})`;
-        ctx.setLineDash([5, 6]);
-        ctx.beginPath();
-        ctx.arc(blocker.x, blocker.y, radius + 9, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.setLineDash([]);
-      }
-    }
-
-    ctx.restore();
-  }
-
-  private drawRipples(ctx: CanvasRenderingContext2D) {
-    ctx.save();
-
-    for (const ripple of this.ripples) {
-      const progress = ripple.age / ripple.duration;
-      const radius = ripple.radius * (0.35 + progress);
-      const alpha = (1 - progress) * 0.42;
-      const color =
-        ripple.color === "player" || ripple.color === "shock"
-          ? palette.playerHot
-          : ripple.color === "enemy"
-            ? palette.infectedHot
-            : palette.neutral;
-
-      ctx.strokeStyle = rgba(color, alpha);
-      ctx.lineWidth = 1.5 + (1 - progress) * 2;
-      ctx.beginPath();
-      ctx.arc(ripple.x, ripple.y, radius, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-
-    ctx.restore();
-  }
-
-  private drawPulses(ctx: CanvasRenderingContext2D) {
-    ctx.save();
-
-    for (const pulse of this.pulses) {
-      const progress = pulse.age / pulse.duration;
-      const alpha = (1 - progress) * (pulse.owner === "player" ? 0.48 : 0.36);
-      const color = pulse.owner === "player" ? palette.playerHot : palette.infectedHot;
-
-      ctx.strokeStyle = rgba(color, alpha);
-      ctx.lineWidth = pulse.kind === "shockwave" ? 4 : 2.6;
-      ctx.beginPath();
-      ctx.arc(pulse.x, pulse.y, pulse.previousRadius, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-
-    ctx.restore();
-  }
-
-  private drawDots(ctx: CanvasRenderingContext2D) {
-    const neutral = this.sprites.neutralDot;
-    const player = this.sprites.playerDot;
-    const infected = this.sprites.infectedDot;
-    const contested = this.sprites.contestedDot;
-
-    ctx.save();
-
-    for (const dot of this.dots) {
-      const frontline = this.frontline[dot.id] ?? 0;
-      const energy = Math.max(dot.energy, dot.enemyEnergy);
-      const contest = Math.min(dot.infectionAmount, dot.playerAmount);
-      let sprite = neutral;
-      let alpha = 0.5 + energy * 0.18;
-      let scale = 2.6;
-
-      if (frontline > 0.18 || contest > 0.16) {
-        sprite = contested;
-        alpha = clamp(0.42 + Math.max(frontline, contest) * 0.5 + energy * 0.2, 0.35, 0.95);
-        scale = 3.9;
-      } else if (dot.infectionAmount > dot.playerAmount && dot.infectionAmount > 0.08) {
-        sprite = infected;
-        alpha = clamp(0.36 + dot.infectionAmount * 0.72 + energy * 0.18, 0.34, 1);
-        scale = 3.8;
-      } else if (dot.playerAmount > 0.08) {
-        sprite = player;
-        alpha = clamp(0.36 + dot.playerAmount * 0.68 + energy * 0.18, 0.34, 1);
-        scale = 3.65;
-      }
-
-      const size = Math.max(4, (dot.radius + frontline * 1.2) * scale);
-      ctx.globalAlpha = alpha;
-
-      if (sprite) {
-        ctx.drawImage(sprite, dot.x - size / 2, dot.y - size / 2, size, size);
-      } else {
-        ctx.fillStyle = "rgba(154, 163, 178, 0.5)";
-        ctx.beginPath();
-        ctx.arc(dot.x, dot.y, dot.radius, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
-
-    ctx.globalAlpha = 1;
-    ctx.restore();
-  }
-
-  private drawParticles(ctx: CanvasRenderingContext2D) {
-    ctx.save();
-
-    for (const particle of this.particles) {
-      const progress = particle.age / particle.duration;
-      const alpha = 1 - progress;
-      const color = particle.kind === "player" ? palette.playerHot : palette.infectedHot;
-      ctx.fillStyle = rgba(color, alpha * 0.78);
-      ctx.beginPath();
-      ctx.arc(particle.x, particle.y, (1.2 + alpha * 2) * particle.size, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    ctx.restore();
-  }
-
-  private drawDestination(ctx: CanvasRenderingContext2D) {
-    ctx.save();
-
-    if (this.destination.active) {
-      const targetDistance = distance(this.player.x, this.player.y, this.destination.x, this.destination.y);
-      const pulse = 1 + Math.sin(this.destination.pulse * 7) * 0.12;
-      const alpha = clamp(0.2 + targetDistance / 420, 0.2, 0.62);
-      ctx.strokeStyle = rgba(palette.player, alpha * 0.62);
-      ctx.lineWidth = 1.4;
-      ctx.setLineDash([5, 8]);
-      ctx.beginPath();
-      ctx.moveTo(this.player.x, this.player.y);
-      ctx.lineTo(this.destination.x, this.destination.y);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.strokeStyle = rgba(palette.playerHot, alpha);
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(this.destination.x, this.destination.y, 12 * pulse, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-
-    if (this.preview.active) {
-      ctx.strokeStyle = rgba(palette.player, 0.22);
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.arc(this.preview.x, this.preview.y, 10, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-
-    ctx.restore();
-  }
-
-  private drawAgents(ctx: CanvasRenderingContext2D) {
-    for (const enemy of this.getActiveEnemies()) {
-      this.drawAgent(ctx, enemy);
-    }
-
-    this.drawAgent(ctx, this.player);
-  }
-
-  private drawAgent(ctx: CanvasRenderingContext2D, agent: Agent) {
-    const isPlayer = agent.kind === "player";
-    const core = isPlayer ? palette.playerHot : palette.infectedHot;
-    const edge = isPlayer ? palette.player : palette.infected;
-    const sprite = isPlayer ? this.sprites.playerCore : this.sprites.enemyCore;
-    const pulse = 1 + Math.sin(this.time * (isPlayer ? 3.2 : 2.6) + agent.id) * 0.08;
-    const radius = agent.radius * pulse;
-    const size = radius * 4.1;
-
-    ctx.save();
-
-    if (sprite) {
-      ctx.drawImage(sprite, agent.x - size / 2, agent.y - size / 2, size, size);
-    } else {
-      ctx.fillStyle = rgba(core, 0.9);
-      ctx.beginPath();
-      ctx.arc(agent.x, agent.y, radius, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    ctx.strokeStyle = rgba(edge, agent.slowTimer > 0 ? 0.72 : 0.44);
-    ctx.lineWidth = agent.slowTimer > 0 ? 2.4 : 1.4;
-    ctx.beginPath();
-    ctx.arc(agent.x, agent.y, radius + 7, 0, Math.PI * 2);
-    ctx.stroke();
-
-    if (!isPlayer) {
-      this.drawEnemyMark(ctx, agent, radius);
-    }
-
-    ctx.restore();
-  }
-
-  private drawEnemyMark(ctx: CanvasRenderingContext2D, enemy: Agent, radius: number) {
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.76)";
-    ctx.fillStyle = "rgba(255, 255, 255, 0.78)";
-    ctx.lineWidth = 1.5;
-
-    if (enemy.type === "tank") {
-      ctx.beginPath();
-      ctx.arc(enemy.x, enemy.y, radius + 11, 0, Math.PI * 2);
-      ctx.stroke();
-      return;
-    }
-
-    if (enemy.type === "root") {
-      for (let index = 0; index < 4; index += 1) {
-        const angle = index * (Math.PI / 2) + this.time * 0.35;
-        ctx.beginPath();
-        ctx.moveTo(enemy.x + Math.cos(angle) * (radius * 0.6), enemy.y + Math.sin(angle) * (radius * 0.6));
-        ctx.lineTo(enemy.x + Math.cos(angle) * (radius + 11), enemy.y + Math.sin(angle) * (radius + 11));
-        ctx.stroke();
-      }
-      return;
-    }
-
-    const satelliteCount = enemy.type === "splitter" ? 2 : enemy.type === "hunter" ? 1 : 3;
-
-    for (let index = 0; index < satelliteCount; index += 1) {
-      const angle = this.time * (enemy.type === "hunter" ? 2.4 : 1.7) + index * ((Math.PI * 2) / satelliteCount);
-      ctx.beginPath();
-      ctx.arc(enemy.x + Math.cos(angle) * (radius + 8), enemy.y + Math.sin(angle) * (radius + 8), 3, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
-
-  private drawArenaFrame(ctx: CanvasRenderingContext2D) {
-    ctx.save();
-    this.arenaPath(ctx, this.arena.radius);
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.92)";
-    ctx.lineWidth = 3;
-    ctx.stroke();
-    this.arenaPath(ctx, this.arena.radius);
-    ctx.strokeStyle = "rgba(122, 144, 168, 0.16)";
-    ctx.lineWidth = 1;
-    ctx.stroke();
-    ctx.restore();
-  }
-
-  private arenaPath(ctx: CanvasRenderingContext2D, radius: number) {
-    const { x, y, width, height } = this.arena;
-    const r = Math.min(radius, width / 2, height / 2);
-
-    ctx.beginPath();
-    ctx.moveTo(x + r, y);
-    ctx.lineTo(x + width - r, y);
-    ctx.quadraticCurveTo(x + width, y, x + width, y + r);
-    ctx.lineTo(x + width, y + height - r);
-    ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
-    ctx.lineTo(x + r, y + height);
-    ctx.quadraticCurveTo(x, y + height, x, y + height - r);
-    ctx.lineTo(x, y + r);
-    ctx.quadraticCurveTo(x, y, x + r, y);
-    ctx.closePath();
   }
 }
