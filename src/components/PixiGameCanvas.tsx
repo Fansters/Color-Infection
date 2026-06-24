@@ -25,6 +25,7 @@ export function PixiGameCanvas({ game, debugVisible, onStats, onDebugStats }: Pi
   const rendererRef = useRef<PixiRenderer | null>(null);
   const dprRef = useRef(1);
   const debugVisibleRef = useRef(debugVisible);
+  const pointerDownRef = useRef(false);
   const callbacksRef = useRef({ onStats, onDebugStats });
 
   useEffect(() => {
@@ -124,6 +125,7 @@ export function PixiGameCanvas({ game, debugVisible, onStats, onDebugStats }: Pi
 
   const handlePointerDown = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
+      pointerDownRef.current = true;
       event.currentTarget.setPointerCapture(event.pointerId);
       const point = getLocalPoint(event);
       game.setPointer(point.x, point.y);
@@ -134,17 +136,25 @@ export function PixiGameCanvas({ game, debugVisible, onStats, onDebugStats }: Pi
 
   const handlePointerMove = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
-      if (event.pointerType !== "mouse") {
+      const point = getLocalPoint(event);
+
+      if (pointerDownRef.current) {
+        game.setPointer(point.x, point.y);
         return;
       }
 
-      const point = getLocalPoint(event);
-      game.setPreview(point.x, point.y);
+      if (event.pointerType === "mouse") {
+        game.setPreview(point.x, point.y);
+      }
     },
     [game],
   );
 
-  const clearPointer = useCallback(() => {
+  const clearPointer = useCallback((event?: React.PointerEvent<HTMLDivElement>) => {
+    pointerDownRef.current = false;
+    if (event?.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
     game.clearPointer();
   }, [game]);
 

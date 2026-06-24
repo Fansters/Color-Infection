@@ -69,21 +69,15 @@ export class Dot {
     this.energy = damp(this.energy, rawPlayerEnergy, 12, dt);
     this.enemyEnergy = damp(this.enemyEnergy, rawEnemyEnergy, 10, dt);
 
-    const dominantField = this.energy >= this.enemyEnergy ? playerField : enemyField;
     const dominantEnergy = Math.max(this.energy, this.enemyEnergy);
-    const angle = Math.atan2(this.baseY - dominantField.y, this.baseX - dominantField.x);
     const driftX =
       Math.sin(time * 0.55 * this.wobble + this.phase) * 0.85 +
       Math.sin(time * 0.21 + this.phase * 1.7) * 0.45;
     const driftY =
       Math.cos(time * 0.47 * this.wobble + this.phase * 0.8) * 0.85 +
       Math.sin(time * 0.18 + this.phase) * 0.45;
-    const repel = dominantEnergy * 16;
-    const swirl = Math.sin(dominantEnergy * Math.PI) * 4.5;
-    const targetX =
-      this.baseX + driftX + Math.cos(angle) * repel + Math.cos(angle + Math.PI / 2) * swirl;
-    const targetY =
-      this.baseY + driftY + Math.sin(angle) * repel + Math.sin(angle + Math.PI / 2) * swirl;
+    const targetX = this.baseX + driftX;
+    const targetY = this.baseY + driftY;
 
     const nextX = damp(this.x, targetX, 10, dt);
     const nextY = damp(this.y, targetY, 10, dt);
@@ -97,7 +91,7 @@ export class Dot {
       this.baseRadius +
       this.infectionAmount * 1.35 +
       this.playerAmount * 0.55 +
-      dominantEnergy * 3.6 +
+      dominantEnergy * 0.45 +
       infectionPulse;
     this.radius = damp(this.radius, Math.max(0.8, targetRadius), 14, dt);
   }

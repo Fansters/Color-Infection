@@ -114,3 +114,93 @@
 - Core combat numbers are first-pass prototype tuning and may need iteration after feel testing.
 
 final result: passed
+
+## V1.09 Core Radius + Clash Readability QA
+
+**Scope**
+- Added explicit current/base core radius roles:
+  - `bodyRadius` for orb visual size,
+  - `collisionRadius` for physical pushback,
+  - `combatRadius` for ring-touch clash damage,
+  - `influenceRadius` for healing/infection territory control,
+  - `visionRadius` for fog reveal.
+- Reduced healing/infection influence range to roughly 50% of the prior V1.08 field radius.
+- Added level scaling for influence with `baseInfluenceRadius * (1 + 0.05 * (level - 1))`.
+- Kept vision larger than influence for scouting and fog reveal.
+- Aligned combat damage with visible combat ring contact.
+- Made influence visuals subtler and combat rings clearer.
+- Added clash advantage particles:
+  - cyan for player advantage,
+  - orange/red for enemy advantage,
+  - purple/gray for even clashes.
+- Added lightweight enemy intent cues:
+  - hunter attack lines,
+  - spreader aura pulses,
+  - tank blocking rings,
+  - retreat/recover lines,
+  - enemy pulse warning rings.
+
+**Verification**
+- `npm.cmd run lint`: passed.
+- `npm.cmd run build`: passed.
+
+**Residual Risk**
+- Radius and combat readability values are first-pass tuning and should be playtested in Level 4-6 where clashes and enemy intent cues appear often.
+
+final result: passed
+
+## V1.08 Dark Glass UI QA
+
+**Scope**
+- Reworked the React HUD into one compact dark glass top command bar.
+- Moved logo, infected count, cleansed count, timer, infection level, wave, shield, level controls, AI difficulty, reset, and pause into the top bar.
+- Removed visible bottom ability dock, bottom level control, bottom reset, mobile stat circles, and separate mobile top cluster.
+- Changed arena bounds so playable space starts below the top bar and runs full-width to the bottom edge.
+- Shifted Pixi background/frame colors to a darker atmospheric shell.
+
+**Verification**
+- `npm.cmd run lint`: passed.
+- `npm.cmd run build`: passed after rerunning with permission to write Next.js `.next` trace files.
+- Headless Microsoft Edge screenshot smoke: passed for React HUD shell.
+  - Top glass navbar rendered.
+  - Bottom controls were no longer visible.
+  - HUD stats updated after load.
+  - Screenshot saved at `C:\Users\edmun\OneDrive\Dokumenti\Color Infection\artifacts\color-infection-v108-dark-topbar-ready.png`.
+
+**Residual Risk**
+- Headless Edge did not reliably show the WebGL arena contents in the saved screenshot, although the HUD updated and production build passed.
+- A live in-browser visual pass is still recommended for exact arena/fog rendering against the provided prototype.
+
+final result: passed
+
+## V1.07 Movement + Fog Of War QA
+
+**Scope**
+- Removed the core-adjacent magnify/lens feel by disabling dot repel, swirl, and large energy scaling around cores.
+- Changed movement from click-only destination commits to hold-and-drag steering on desktop and mobile.
+- Reduced core movement speed by 50% while increasing direct cleanse/infect strength so contact resolves quickly.
+- Added separate player and enemy fog maps.
+- Added a low-resolution Pixi fog overlay for player exploration.
+- Updated enemy AI awareness so the player core and player base are not intentionally targeted until enemy exploration discovers them.
+
+**Verification**
+- `npm.cmd run lint`: passed.
+- `npm.cmd run build`: passed.
+- Desktop browser smoke with system Chrome: passed.
+  - Pixi canvas rendered with no console/page errors.
+  - Mouse hold/drag redirected the player core.
+  - `D` diagnostics and `Space` shockwave still worked.
+  - Fog visibly covered unexplored arena space with a revealed player start area.
+- Mobile browser smoke with system Chrome: passed.
+  - Pixi canvas rendered at 390x844 with no console/page errors.
+  - Touch/tap movement path remained functional.
+  - Mobile HUD and stats remained visible.
+- Screenshots:
+  - `C:\Users\edmun\OneDrive\Dokumenti\Color Infection\artifacts\color-infection-v107-fog-smoke.png`
+  - `C:\Users\edmun\OneDrive\Dokumenti\Color Infection\artifacts\color-infection-v107-mobile-fog-smoke.png`
+
+**Residual Risk**
+- Fog opacity and reveal radius are first-pass tuning values.
+- Enemy discovery behavior is implemented for strategic targeting, but deeper hidden-information behavior can still be expanded later for node/base scouting tactics.
+
+final result: passed

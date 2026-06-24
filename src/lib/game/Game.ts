@@ -12,12 +12,20 @@ export type RippleColor = AgentKind | "shock" | "collision" | "node";
 export type PulseKind = "shockwave" | "node" | "enemy";
 export type BlockerKind = "wall" | "gate";
 export type AIDifficulty = "easy" | "medium" | "hard";
+export type CombatState = "idle" | "contact" | "clash" | "overpower" | "break";
+export type ParticleKind = AgentKind | "clashPlayer" | "clashEnemy" | "clashEven";
+export type RecoveryState = "combat" | "recoveryDelay" | "regenOwnTerritory" | "regenBase" | "noSupply";
+export type TerritorySupply = "own" | "enemy" | "neutral" | "base" | "miniBase";
 
 export const MAX_RIPPLES = 30;
 export const MAX_PARTICLES = 300;
 export const MAX_PULSES = 10;
 export const MAX_PULSE_DOT_HITS_PER_FRAME = 80;
 export const MAX_PULSE_PARTICLES_PER_FRAME = 40;
+export const XP_DOT_CLEANSED = 1;
+export const XP_NODE_CAPTURED = 50;
+export const XP_ENEMY_KILL = 100;
+export const XP_DAMAGE_CAP_PER_SECOND = 5;
 const MAX_CONTESTED_ZONES = 18;
 const MAX_ENEMIES = 7;
 const DOT_GRID_CELL_SIZE = 78;
@@ -26,6 +34,19 @@ const SHIELD_DURATION = 6;
 const SHIELD_COOLDOWN = 12;
 export const HAZE_SCALE = 0.33;
 export const HAZE_FRAME_INTERVAL = 4;
+export const FOG_SCALE = 0.3;
+export const FOG_UPDATE_EVERY_FRAMES = 5;
+export const FOG_REVEAL_STEP_DISTANCE = 12;
+export const FOG_UNEXPLORED_OPACITY = 0.96;
+export const FOG_EXPLORED_OPACITY = 0.45;
+export const FOG_VISIBLE_OPACITY = 0;
+const CORE_SPEED_SCALE = 0.5;
+const DIRECT_CLEANSE_SCALE = 14;
+const DIRECT_INFECT_SCALE = 12;
+const FOG_REVEAL_SCALE = 1.35;
+const COMBAT_LOCKOUT_SECONDS = 3;
+const BASE_REGEN_DELAY_SECONDS = 0.75;
+export const CHUNK_SIZE = 192;
 
 export type Agent = {
   id: number;
@@ -44,7 +65,12 @@ export type Agent = {
   homeX: number;
   homeY: number;
   baseRadius: number;
-  baseFieldRadius: number;
+  baseCombatRadius: number;
+  baseInfluenceRadius: number;
+  baseVisionRadius: number;
+  bodyRadius: number;
+  collisionRadius: number;
+  combatRadius: number;
   radius: number;
   fieldRadius: number;
   speed: number;
@@ -60,7 +86,25 @@ export type Agent = {
   level: number;
   xp: number;
   influenceRadius: number;
+  visionRadius: number;
   slowTimer: number;
+  contactTimer: number;
+  breakTimer: number;
+  hitFlashTimer: number;
+  shieldFlashTimer: number;
+  healthPulseTimer: number;
+  effectTickTimer: number;
+  combatState: CombatState;
+  lastDamageTakenAt: number;
+  lastDamageDealtAt: number;
+  lastClashAt: number;
+  isInCombat: boolean;
+  combatLockoutTimer: number;
+  recoveryState: RecoveryState;
+  healthRegenPerSec: number;
+  shieldRegenPerSec: number;
+  localTerritory: TerritorySupply;
+  baseProximity: number;
   pulseTimer: number;
   decisionTimer: number;
   lastDecisionInterval: number;
@@ -84,6 +128,8 @@ export type CoreBase = {
   y: number;
   radius: number;
   pulse: number;
+  captureBy: AgentKind | null;
+  captureProgress: number;
 };
 
 export type Arena = {
@@ -184,7 +230,7 @@ export type Particle = {
   age: number;
   duration: number;
   size: number;
-  kind: AgentKind;
+  kind: ParticleKind;
 };
 
 type InfluenceSample = {
@@ -194,9 +240,11 @@ type InfluenceSample = {
 
 type EnemySettings = {
   radius: number;
+  combatRadius: number;
   fieldRadius: number;
   speed: number;
   mass: number;
+  shield: number;
   spreadPower: number;
   pulseEvery: [number, number];
   canMove: boolean;
@@ -283,6 +331,9 @@ export type GameStats = {
   overtimeSeconds: number;
   infectionLevel: number;
   playerCoverage: number;
+  playerBaseCapture: number;
+  enemyBaseCapture: number;
+  fogVisualsEnabled: boolean;
   shockwaveCharge: number;
   shockwaveReady: boolean;
   shieldReady: boolean;
@@ -298,6 +349,11 @@ export type GameStats = {
   playerShield: number;
   playerMaxShield: number;
   playerRespawnTimer: number;
+  playerRecoveryState: RecoveryState;
+  playerRecoveryDelayRemaining: number;
+  playerHealthRegenPerSec: number;
+  playerShieldRegenPerSec: number;
+  playerLocalTerritory: TerritorySupply;
   nodePlayerCount: number;
   nodeEnemyCount: number;
   enemyMode: EnemyMode;
@@ -348,11 +404,35 @@ export type GameDebugStats = {
   shieldCooldownRemaining: number;
   shieldTimer: number;
   playerRespawnTimer: number;
+  recoveryState: RecoveryState;
+  combatLockoutRemaining: number;
+  recoveryDelayRemaining: number;
+  healthRegenPerSec: number;
+  shieldRegenPerSec: number;
+  localTerritory: TerritorySupply;
+  baseProximity: number;
   enemyHealthSummary: string;
   aiDifficulty: AIDifficulty;
   aiTargets: string;
   enemyDeaths: number;
   playerDeaths: number;
+  visibleDotCount: number;
+  hiddenDotCount: number;
+  activeDotSpriteCount: number;
+  syncedDotSprites: number;
+  dirtyDotCount: number;
+  visibleChunkCount: number;
+  dirtyChunkCount: number;
+  foggedChunkCount: number;
+  hazeTextureUpdates: number;
+  fogTextureUpdates: number;
+  renderStateBuildMs: number;
+  renderStateAllocationCount: number;
+  syncDotsMs: number;
+  syncHealthBarsMs: number;
+  syncFogHazeMs: number;
+  unaccountedFrameMs: number;
+  fogVisualsEnabled: boolean;
 };
 
 export type PixiRenderMetrics = {
@@ -364,16 +444,36 @@ export type PixiRenderMetrics = {
   hazeRebuildMs: number;
   hazeEvery: number;
   pixiSyncMs: number;
+  visibleDotCount: number;
+  hiddenDotCount: number;
+  activeDotSpriteCount: number;
+  syncedDotSprites: number;
+  dirtyDotCount: number;
+  visibleChunkCount: number;
+  dirtyChunkCount: number;
+  foggedChunkCount: number;
+  hazeTextureUpdates: number;
+  fogTextureUpdates: number;
+  renderStateBuildMs: number;
+  renderStateAllocationCount: number;
+  syncDotsMs: number;
+  syncHealthBarsMs: number;
+  syncFogHazeMs: number;
+  fogVisualsEnabled: boolean;
 };
 
 export type GameRenderState = {
   revision: number;
+  fogRevision: number;
   width: number;
   height: number;
   time: number;
   arena: Arena;
   dots: Dot[];
   frontline: Float32Array;
+  playerFog: Float32Array;
+  playerVisibility: Float32Array;
+  enemyFog: Float32Array;
   player: Agent;
   enemies: Agent[];
   nodes: ControlNode[];
@@ -391,50 +491,61 @@ export type GameRenderState = {
   debugVisible: boolean;
   status: GameStatus;
   paused: boolean;
+  fogVisualsEnabled: boolean;
 };
 
 const ENEMY_SETTINGS: Record<EnemyType, EnemySettings> = {
   spreader: {
     radius: 17,
+    combatRadius: 29,
     fieldRadius: 112,
     speed: 62,
     mass: 1.15,
+    shield: 20,
     spreadPower: 1.36,
     pulseEvery: [6.8, 8.4],
     canMove: true,
   },
   hunter: {
     radius: 15,
+    combatRadius: 27,
     fieldRadius: 76,
     speed: 112,
     mass: 0.92,
+    shield: 20,
     spreadPower: 0.58,
     pulseEvery: [8.2, 10],
     canMove: true,
   },
   tank: {
     radius: 24,
+    combatRadius: 36,
     fieldRadius: 102,
     speed: 48,
     mass: 3.4,
+    shield: 40,
     spreadPower: 0.92,
     pulseEvery: [8, 10.5],
     canMove: true,
   },
   splitter: {
     radius: 16,
+    combatRadius: 28,
     fieldRadius: 88,
     speed: 78,
     mass: 1,
+    shield: 24,
     spreadPower: 0.82,
     pulseEvery: [7.8, 10.4],
     canMove: true,
   },
   root: {
     radius: 21,
+    combatRadius: 34,
     fieldRadius: 106,
     speed: 0,
     mass: 4.8,
+    shield: 32,
     spreadPower: 1.08,
     pulseEvery: [5.6, 7.2],
     canMove: false,
@@ -570,23 +681,46 @@ function createPlayer(): Agent {
     homeX: 0,
     homeY: 0,
     baseRadius: 16,
-    baseFieldRadius: 84,
+    baseCombatRadius: 28,
+    baseInfluenceRadius: 42,
+    baseVisionRadius: 114,
+    bodyRadius: 16,
+    collisionRadius: 18,
+    combatRadius: 28,
     radius: 16,
-    fieldRadius: 84,
+    fieldRadius: 42,
     speed: 156,
     moveSpeed: 156,
     mass: 1.1,
     spreadPower: 1,
-    power: 28,
+    power: 20,
     intensity: 1,
-    health: 120,
-    maxHealth: 120,
-    shield: 40,
-    maxShield: 40,
+    health: 100,
+    maxHealth: 100,
+    shield: 20,
+    maxShield: 20,
     level: 1,
     xp: 0,
-    influenceRadius: 84,
+    influenceRadius: 42,
+    visionRadius: 114,
     slowTimer: 0,
+    contactTimer: 0,
+    breakTimer: 0,
+    hitFlashTimer: 0,
+    shieldFlashTimer: 0,
+    healthPulseTimer: 0,
+    effectTickTimer: 0,
+    combatState: "idle",
+    lastDamageTakenAt: -999,
+    lastDamageDealtAt: -999,
+    lastClashAt: -999,
+    isInCombat: false,
+    combatLockoutTimer: 0,
+    recoveryState: "noSupply",
+    healthRegenPerSec: 0,
+    shieldRegenPerSec: 0,
+    localTerritory: "neutral",
+    baseProximity: 0,
     pulseTimer: 0,
     decisionTimer: 0,
     lastDecisionInterval: 0,
@@ -625,23 +759,46 @@ function createEnemy(type: EnemyType, id: number, config: LevelConfig): Agent {
     homeX: 0,
     homeY: 0,
     baseRadius: settings.radius,
-    baseFieldRadius: settings.fieldRadius,
+    baseCombatRadius: settings.combatRadius,
+    baseInfluenceRadius: settings.fieldRadius * 0.5,
+    baseVisionRadius: settings.fieldRadius * 1.24,
+    bodyRadius: settings.radius,
+    collisionRadius: settings.radius + 2,
+    combatRadius: settings.combatRadius,
     radius: settings.radius,
-    fieldRadius: settings.fieldRadius,
+    fieldRadius: settings.fieldRadius * 0.5,
     speed: settings.speed * config.enemySpeedScale,
     moveSpeed: settings.speed * config.enemySpeedScale,
     mass: settings.mass,
     spreadPower: settings.spreadPower,
-    power: 24 + settings.spreadPower * 9,
+    power: 20,
     intensity: 0.96,
-    health: 105 + settings.mass * 10,
-    maxHealth: 105 + settings.mass * 10,
-    shield: 28,
-    maxShield: 28,
+    health: 100,
+    maxHealth: 100,
+    shield: settings.shield,
+    maxShield: settings.shield,
     level: 1,
     xp: 0,
-    influenceRadius: settings.fieldRadius,
+    influenceRadius: settings.fieldRadius * 0.5,
+    visionRadius: settings.fieldRadius * 1.24,
     slowTimer: 0,
+    contactTimer: 0,
+    breakTimer: 0,
+    hitFlashTimer: 0,
+    shieldFlashTimer: 0,
+    healthPulseTimer: 0,
+    effectTickTimer: 0,
+    combatState: "idle",
+    lastDamageTakenAt: -999,
+    lastDamageDealtAt: -999,
+    lastClashAt: -999,
+    isInCombat: false,
+    combatLockoutTimer: 0,
+    recoveryState: "noSupply",
+    healthRegenPerSec: 0,
+    shieldRegenPerSec: 0,
+    localTerritory: "neutral",
+    baseProximity: 0,
     pulseTimer: randomRange(settings.pulseEvery[0], settings.pulseEvery[1]),
     decisionTimer: 0,
     lastDecisionInterval: 0,
@@ -707,6 +864,9 @@ export class Game {
   private playerExposure = new Float32Array(0);
   private dotViscosity = new Float32Array(0);
   private frontline = new Float32Array(0);
+  private playerFog = new Float32Array(0);
+  private playerVisibility = new Float32Array(0);
+  private enemyFog = new Float32Array(0);
   private ripples: Ripple[] = [];
   private pulses: ActivePulse[] = [];
   private nodes: ControlNode[] = [];
@@ -729,13 +889,23 @@ export class Game {
   private maxFrameMsLast5s = 0;
   private time = 0;
   private collisionCooldown = 0;
+  private fogRevision = 0;
+  private fogFrameCounter = 0;
+  private playerVisibleDotIds: number[] = [];
+  private lastPlayerFogReveal = { x: 0, y: 0, ready: false };
+  private lastPlayerVisibility = { x: 0, y: 0, ready: false };
+  private enemyFogRevealState = new Map<number, { x: number; y: number; ready: boolean }>();
   private shockwaveCharge = 1;
   private shieldTimer = 0;
   private shieldCooldownRemaining = 0;
   private aiDifficulty: AIDifficulty = "medium";
+  private fogVisualsEnabled = false;
   private playerDeaths = 0;
   private enemyDeaths = 0;
   private renderRevision = 0;
+  private renderStateBuildMs = 0;
+  private renderStateAllocationCount = 0;
+  private visualFrame = 0;
   private debugStats: GameDebugStats = {
     fps: 0,
     frameMs: 0,
@@ -766,8 +936,8 @@ export class Game {
     pulseProcessMs: 0,
     playerLevel: 1,
     playerXp: 0,
-    playerHealth: 120,
-    playerShield: 40,
+    playerHealth: 100,
+    playerShield: 20,
     shieldCooldownRemaining: 0,
     shieldTimer: 0,
     playerRespawnTimer: 0,
@@ -776,6 +946,30 @@ export class Game {
     aiTargets: "none",
     enemyDeaths: 0,
     playerDeaths: 0,
+    recoveryState: "noSupply",
+    combatLockoutRemaining: 0,
+    recoveryDelayRemaining: 0,
+    healthRegenPerSec: 0,
+    shieldRegenPerSec: 0,
+    localTerritory: "neutral",
+    baseProximity: 0,
+    visibleDotCount: 0,
+    hiddenDotCount: 0,
+    activeDotSpriteCount: 0,
+    syncedDotSprites: 0,
+    dirtyDotCount: 0,
+    visibleChunkCount: 0,
+    dirtyChunkCount: 0,
+    foggedChunkCount: 0,
+    hazeTextureUpdates: 0,
+    fogTextureUpdates: 0,
+    renderStateBuildMs: 0,
+    renderStateAllocationCount: 0,
+    syncDotsMs: 0,
+    syncHealthBarsMs: 0,
+    syncFogHazeMs: 0,
+    unaccountedFrameMs: 0,
+    fogVisualsEnabled: false,
   };
 
   resize(width: number, height: number) {
@@ -848,7 +1042,9 @@ export class Game {
 
     this.shieldTimer = SHIELD_DURATION;
     this.shieldCooldownRemaining = SHIELD_COOLDOWN;
-    this.player.shield = Math.min(this.player.maxShield + 36, this.player.shield + this.player.maxShield * 0.65 + 24);
+    this.player.breakTimer = Math.max(this.player.breakTimer, 0.3);
+    this.player.shieldFlashTimer = Math.max(this.player.shieldFlashTimer, 0.42);
+    this.player.shield = Math.min(this.player.maxShield + 24, this.player.shield + this.player.maxShield * 0.65 + 16);
     this.addRipple(this.player.x, this.player.y, "player", this.player.radius + 98);
     return true;
   }
@@ -882,7 +1078,7 @@ export class Game {
       return;
     }
 
-    const target = this.findOpenPoint(x, y, this.player.radius + 10);
+    const target = this.findOpenPoint(x, y, this.player.collisionRadius + 10);
     this.destination.active = true;
     this.destination.x = target.x;
     this.destination.y = target.y;
@@ -897,7 +1093,7 @@ export class Game {
       return;
     }
 
-    const target = this.findOpenPoint(x, y, this.player.radius + 10);
+    const target = this.findOpenPoint(x, y, this.player.collisionRadius + 10);
     this.preview.active = true;
     this.preview.x = target.x;
     this.preview.y = target.y;
@@ -934,6 +1130,7 @@ export class Game {
       strength: 0.34 * (this.player.level >= 2 ? 1.5 : 1) * (1 + (this.player.level - 1) * 0.08),
       kind: "shockwave",
     });
+    this.player.breakTimer = Math.max(this.player.breakTimer, 0.32);
     this.addRipple(this.player.x, this.player.y, "shock", 110);
     return true;
   }
@@ -973,7 +1170,25 @@ export class Game {
     this.updateContestedZones(safeDt);
     this.updateParticles(safeDt);
 
+    this.visualFrame += 1;
+
     for (const dot of this.dots) {
+      const visible = this.playerVisibility[dot.id] ?? 0;
+      const explored = this.playerFog[dot.id] ?? 0;
+      const active =
+        visible > 0.035 ||
+        (this.frontline[dot.id] ?? 0) > 0.18 ||
+        dot.energy > 0.14 ||
+        dot.enemyEnergy > 0.14;
+
+      if (!active && explored <= 0.025) {
+        continue;
+      }
+
+      if (!active && this.visualFrame % 12 !== dot.id % 12) {
+        continue;
+      }
+
       dot.updateVisual(safeDt, this.time, this.playerField, this.enemyField);
     }
   }
@@ -988,6 +1203,7 @@ export class Game {
     const fps = frameMs > 0 ? 1000 / frameMs : 0;
     const activeEffectCount =
       this.ripples.length + this.particles.length + this.pulses.length + this.contestedZones.length;
+    const unaccountedFrameMs = Math.max(0, frameMs - updateMs - drawMs);
     this.trackFrameWindow(frameMs);
 
     this.debugStats = {
@@ -1025,11 +1241,35 @@ export class Game {
       shieldCooldownRemaining: this.shieldCooldownRemaining,
       shieldTimer: this.shieldTimer,
       playerRespawnTimer: this.player.respawnTimer,
+      recoveryState: this.player.recoveryState,
+      combatLockoutRemaining: this.player.combatLockoutTimer,
+      recoveryDelayRemaining: this.getRecoveryDelayRemaining(this.player),
+      healthRegenPerSec: this.player.healthRegenPerSec,
+      shieldRegenPerSec: this.player.shieldRegenPerSec,
+      localTerritory: this.player.localTerritory,
+      baseProximity: this.player.baseProximity,
       enemyHealthSummary: this.getEnemyHealthSummary(),
       aiDifficulty: this.aiDifficulty,
       aiTargets: this.getAiTargetSummary(),
       enemyDeaths: this.enemyDeaths,
       playerDeaths: this.playerDeaths,
+      visibleDotCount: pixiMetrics?.visibleDotCount ?? 0,
+      hiddenDotCount: pixiMetrics?.hiddenDotCount ?? 0,
+      activeDotSpriteCount: pixiMetrics?.activeDotSpriteCount ?? 0,
+      syncedDotSprites: pixiMetrics?.syncedDotSprites ?? 0,
+      dirtyDotCount: pixiMetrics?.dirtyDotCount ?? 0,
+      visibleChunkCount: pixiMetrics?.visibleChunkCount ?? 0,
+      dirtyChunkCount: pixiMetrics?.dirtyChunkCount ?? 0,
+      foggedChunkCount: pixiMetrics?.foggedChunkCount ?? 0,
+      hazeTextureUpdates: pixiMetrics?.hazeTextureUpdates ?? 0,
+      fogTextureUpdates: pixiMetrics?.fogTextureUpdates ?? 0,
+      renderStateBuildMs: this.renderStateBuildMs,
+      renderStateAllocationCount: this.renderStateAllocationCount,
+      syncDotsMs: pixiMetrics?.syncDotsMs ?? 0,
+      syncHealthBarsMs: pixiMetrics?.syncHealthBarsMs ?? 0,
+      syncFogHazeMs: pixiMetrics?.syncFogHazeMs ?? 0,
+      unaccountedFrameMs,
+      fogVisualsEnabled: this.fogVisualsEnabled,
     };
   }
 
@@ -1077,14 +1317,20 @@ export class Game {
   }
 
   getRenderState(debugVisible = false): GameRenderState {
-    return {
+    const started = typeof performance !== "undefined" ? performance.now() : 0;
+    this.renderStateAllocationCount = 1;
+    const state = {
       revision: this.renderRevision,
+      fogRevision: this.fogRevision,
       width: this.width,
       height: this.height,
       time: this.time,
       arena: this.arena,
       dots: this.dots,
       frontline: this.frontline,
+      playerFog: this.playerFog,
+      playerVisibility: this.playerVisibility,
+      enemyFog: this.enemyFog,
       player: this.player,
       enemies: this.getActiveEnemies(),
       nodes: this.nodes,
@@ -1102,7 +1348,11 @@ export class Game {
       debugVisible,
       status: this.status,
       paused: this.paused,
+      fogVisualsEnabled: this.fogVisualsEnabled,
     };
+
+    this.renderStateBuildMs = started > 0 ? performance.now() - started : 0;
+    return state;
   }
 
   getStats(): GameStats {
@@ -1128,6 +1378,10 @@ export class Game {
     const activeEnemies = this.getActiveEnemies();
     const primaryEnemy = activeEnemies[0];
     const config = this.levelConfig;
+    const playerBaseCapture = this.bases.find((base) => base.team === "player")?.captureProgress ?? 0;
+    const enemyBaseCapture = this.bases
+      .filter((base) => base.team === "enemy")
+      .reduce((max, base) => Math.max(max, base.captureProgress), 0);
 
     return {
       totalDots,
@@ -1139,6 +1393,9 @@ export class Game {
       overtimeSeconds: Math.max(0, Math.floor(this.elapsedSeconds - this.durationSeconds)),
       infectionLevel: clamp(Math.max(infectedRatio, averageInfection) * 100, 0, 100),
       playerCoverage: clamp((cleansedCount / totalDots) * 100, 0, 100),
+      playerBaseCapture: clamp(playerBaseCapture * 100, 0, 100),
+      enemyBaseCapture: clamp(enemyBaseCapture * 100, 0, 100),
+      fogVisualsEnabled: this.fogVisualsEnabled,
       shockwaveCharge: clamp(this.shockwaveCharge * 100, 0, 100),
       shockwaveReady: this.shockwaveCharge >= 1,
       shieldReady:
@@ -1152,12 +1409,17 @@ export class Game {
       shieldTimer: Math.max(0, this.shieldTimer),
       playerLevel: this.player.level,
       playerXp: Math.floor(this.player.xp),
-      playerNextLevelXp: this.getNextLevelXp(this.player.level),
+      playerNextLevelXp: this.player.level >= 5 ? this.getPlayerXpCap() : this.getNextLevelXp(this.player.level),
       playerHealth: Math.max(0, this.player.health),
       playerMaxHealth: this.player.maxHealth,
       playerShield: Math.max(0, this.player.shield),
       playerMaxShield: this.player.maxShield,
       playerRespawnTimer: Math.max(0, this.player.respawnTimer),
+      playerRecoveryState: this.player.recoveryState,
+      playerRecoveryDelayRemaining: this.getRecoveryDelayRemaining(this.player),
+      playerHealthRegenPerSec: this.player.healthRegenPerSec,
+      playerShieldRegenPerSec: this.player.shieldRegenPerSec,
+      playerLocalTerritory: this.player.localTerritory,
       nodePlayerCount: this.nodes.filter((node) => node.owner === "player").length,
       nodeEnemyCount: this.nodes.filter((node) => node.owner === "enemy").length,
       enemyMode: primaryEnemy?.mode ?? "expand",
@@ -1184,9 +1446,9 @@ export class Game {
 
   private updateArena() {
     const isMobile = this.width < 720;
-    const sideInset = isMobile ? 16 : 36;
-    const topInset = isMobile ? 112 : 136;
-    const bottomInset = isMobile ? 124 : 56;
+    const sideInset = 0;
+    const topInset = isMobile ? 54 : 50;
+    const bottomInset = 0;
 
     this.arena = {
       x: sideInset,
@@ -1195,7 +1457,7 @@ export class Game {
       height: Math.max(260, this.height - topInset - bottomInset),
       right: this.width - sideInset,
       bottom: this.height - bottomInset,
-      radius: isMobile ? 28 : 36,
+      radius: 0,
     };
   }
 
@@ -1265,6 +1527,17 @@ export class Game {
     this.playerExposure = new Float32Array(dots.length);
     this.dotViscosity = new Float32Array(dots.length);
     this.frontline = new Float32Array(dots.length);
+    this.playerFog = new Float32Array(dots.length);
+    this.playerVisibility = new Float32Array(dots.length);
+    this.enemyFog = new Float32Array(dots.length);
+    this.playerFog.fill(1);
+    this.playerVisibility.fill(1);
+    this.enemyFog.fill(1);
+    this.playerVisibleDotIds = [];
+    this.lastPlayerFogReveal = { x: 0, y: 0, ready: false };
+    this.lastPlayerVisibility = { x: 0, y: 0, ready: false };
+    this.enemyFogRevealState.clear();
+    this.fogRevision += 1;
     this.rebuildDotGrid();
 
     for (const dot of this.dots) {
@@ -1281,6 +1554,7 @@ export class Game {
     }
 
     this.seedInfectionSources(config.infectionSources, Math.max(actualSpacingX, actualSpacingY));
+    this.revealInitialFog();
     this.updateFields();
     this.updateFrontlines();
     this.renderRevision += 1;
@@ -1307,16 +1581,17 @@ export class Game {
     this.player.homeY = playerPosition.y;
     this.player.baseX = playerPosition.x;
     this.player.baseY = playerPosition.y;
-    this.player.fieldRadius = clamp(Math.min(this.width, this.height) * 0.11, 72, 102);
-    this.player.baseFieldRadius = this.player.fieldRadius;
-    this.player.speed = this.width < 720 ? 118 : 156;
+    const playerLegacyFieldRadius = clamp(Math.min(this.width, this.height) * 0.11, 72, 102);
+    this.player.baseInfluenceRadius = playerLegacyFieldRadius * 0.5;
+    this.player.baseVisionRadius = Math.max(playerLegacyFieldRadius * 1.35, this.player.baseInfluenceRadius + 72);
+    this.player.speed = (this.width < 720 ? 118 : 156) * CORE_SPEED_SCALE;
     this.player.moveSpeed = this.player.speed;
     this.applyCoreLevelStats(this.player, true);
 
     this.enemies = config.enemyTypes.map((type, index) => {
       const enemy = createEnemy(type, index + 1, config);
       const anchor = anchors[index % anchors.length];
-      const position = this.clampToArena(anchor.x, anchor.y, enemy.radius + 10);
+      const position = this.clampToArena(anchor.x, anchor.y, enemy.collisionRadius + 10);
       enemy.x = position.x;
       enemy.y = position.y;
       enemy.targetX = position.x;
@@ -1325,9 +1600,10 @@ export class Game {
       enemy.homeY = position.y;
       enemy.baseX = position.x;
       enemy.baseY = position.y;
-      enemy.fieldRadius = clamp(enemy.fieldRadius * (this.width < 720 ? 0.82 : 1), 56, 124);
-      enemy.baseFieldRadius = enemy.fieldRadius;
-      enemy.speed *= this.width < 720 ? 0.78 : 1;
+      const enemyLegacyFieldRadius = clamp(ENEMY_SETTINGS[type].fieldRadius * (this.width < 720 ? 0.82 : 1), 56, 124);
+      enemy.baseInfluenceRadius = enemyLegacyFieldRadius * 0.5;
+      enemy.baseVisionRadius = Math.max(enemyLegacyFieldRadius * 1.26, enemy.baseInfluenceRadius + 64);
+      enemy.speed *= (this.width < 720 ? 0.78 : 1) * CORE_SPEED_SCALE;
       enemy.moveSpeed = enemy.speed;
       this.applyCoreLevelStats(enemy, true);
       return enemy;
@@ -1336,6 +1612,31 @@ export class Game {
   }
 
   private createBases() {
+    const enemyBases =
+      this.enemies.length > 0
+        ? this.enemies.map((enemy) => ({
+            id: enemy.id,
+            team: "enemy" as const,
+            x: enemy.baseX,
+            y: enemy.baseY,
+            radius: enemy.radius + 34,
+            pulse: randomRange(0, Math.PI * 2),
+            captureBy: null,
+            captureProgress: 0,
+          }))
+        : [
+            {
+              id: -1,
+              team: "enemy" as const,
+              x: this.arena.right - 92,
+              y: this.arena.y + 92,
+              radius: this.player.radius + 38,
+              pulse: randomRange(0, Math.PI * 2),
+              captureBy: null,
+              captureProgress: 0,
+            },
+          ];
+
     this.bases = [
       {
         id: 0,
@@ -1344,15 +1645,10 @@ export class Game {
         y: this.player.baseY,
         radius: this.player.radius + 36,
         pulse: randomRange(0, Math.PI * 2),
+        captureBy: null,
+        captureProgress: 0,
       },
-      ...this.enemies.map((enemy) => ({
-        id: enemy.id,
-        team: "enemy" as const,
-        x: enemy.baseX,
-        y: enemy.baseY,
-        radius: enemy.radius + 34,
-        pulse: randomRange(0, Math.PI * 2),
-      })),
+      ...enemyBases,
     ];
   }
 
@@ -1362,33 +1658,36 @@ export class Game {
     const shieldRatio = agent.maxShield > 0 ? agent.shield / agent.maxShield : 1;
 
     if (agent.kind === "player") {
-      const radiusScale = [1, 1.55, 1.72, 1.9, 2.08][level - 1];
-      const healthScale = [1, 1.18, 1.5, 1.72, 2.05][level - 1];
-      const shieldScale = [1, 1.16, 1.35, 1.55, 1.82][level - 1];
-      const fieldScale = [1, 1.12, 1.22, 1.34, 1.52][level - 1];
+      const levelOffset = level - 1;
       const speedScale = level >= 5 ? 0.9 : 1;
-      agent.radius = agent.baseRadius * radiusScale;
-      agent.fieldRadius = agent.baseFieldRadius * fieldScale;
-      agent.influenceRadius = agent.fieldRadius;
-      agent.maxHealth = 120 * healthScale;
-      agent.maxShield = 40 * shieldScale;
-      agent.mass = 1.1 + level * 0.34;
-      agent.power = 28 + level * 11;
-      agent.spreadPower = 1 + level * 0.12;
+      agent.bodyRadius = agent.baseRadius + levelOffset * 1.5;
+      agent.collisionRadius = agent.bodyRadius + 2;
+      agent.combatRadius = agent.baseCombatRadius + levelOffset * 3;
+      agent.radius = agent.bodyRadius;
+      agent.influenceRadius = agent.baseInfluenceRadius * (1 + 0.05 * levelOffset);
+      agent.visionRadius = agent.baseVisionRadius * (1 + 0.035 * levelOffset);
+      agent.fieldRadius = agent.influenceRadius;
+      agent.maxHealth = 100 + levelOffset * 20;
+      agent.maxShield = 20 + levelOffset * 4;
+      agent.mass = 1.1 + levelOffset * 0.22;
+      agent.power = 20 + levelOffset * 4;
+      agent.spreadPower = 1 + levelOffset * 0.08;
       agent.speed = agent.moveSpeed * speedScale;
     } else {
       const settings = ENEMY_SETTINGS[agent.type as EnemyType];
-      const radiusScale = 1 + (level - 1) * 0.12;
-      const healthScale = 1 + (level - 1) * 0.22;
-      const shieldScale = 1 + (level - 1) * 0.17;
-      agent.radius = agent.baseRadius * radiusScale;
-      agent.fieldRadius = agent.baseFieldRadius * (1 + (level - 1) * 0.08);
-      agent.influenceRadius = agent.fieldRadius;
-      agent.maxHealth = (105 + settings.mass * 10) * healthScale;
-      agent.maxShield = 28 * shieldScale;
-      agent.mass = settings.mass * (1 + (level - 1) * 0.13);
-      agent.power = 24 + settings.spreadPower * 9 + level * 8;
-      agent.spreadPower = settings.spreadPower * (1 + (level - 1) * 0.08);
+      const levelOffset = level - 1;
+      agent.bodyRadius = agent.baseRadius + levelOffset * 1.25;
+      agent.collisionRadius = agent.bodyRadius + (agent.type === "tank" ? 4 : 2);
+      agent.combatRadius = agent.baseCombatRadius + levelOffset * 3;
+      agent.radius = agent.bodyRadius;
+      agent.influenceRadius = agent.baseInfluenceRadius * (1 + 0.05 * levelOffset);
+      agent.visionRadius = agent.baseVisionRadius * (1 + 0.03 * levelOffset);
+      agent.fieldRadius = agent.influenceRadius;
+      agent.maxHealth = 100 + levelOffset * 20;
+      agent.maxShield = settings.shield + levelOffset * 4;
+      agent.mass = settings.mass * (1 + levelOffset * 0.1);
+      agent.power = 20 + levelOffset * 4;
+      agent.spreadPower = settings.spreadPower * (1 + levelOffset * 0.06);
       agent.speed = agent.moveSpeed * (agent.type === "tank" ? 0.96 : 1);
     }
 
@@ -1402,25 +1701,33 @@ export class Game {
   }
 
   private getNextLevelXp(level: number) {
-    return [0, 80, 190, 340, 540, Number.POSITIVE_INFINITY][clamp(level, 1, 5)] ?? Number.POSITIVE_INFINITY;
+    return [0, 80, 180, 340, 560, Number.POSITIVE_INFINITY][clamp(level, 1, 5)] ?? Number.POSITIVE_INFINITY;
+  }
+
+  private getPlayerXpCap() {
+    return 560;
   }
 
   private grantPlayerXp(amount: number) {
-    if (amount <= 0 || this.player.level >= 5) {
-      this.player.xp += Math.max(0, amount);
+    if (amount <= 0) {
       return;
     }
 
-    this.player.xp += amount;
+    const xpCap = this.getPlayerXpCap();
+    this.player.xp = clamp(this.player.xp + amount, 0, xpCap);
 
     while (this.player.level < 5 && this.player.xp >= this.getNextLevelXp(this.player.level)) {
       this.player.level += 1;
       this.applyCoreLevelStats(this.player);
-      this.player.health = this.player.maxHealth;
-      this.player.shield = this.player.maxShield;
+      this.player.health = clamp(this.player.health + this.player.maxHealth * 0.2, 1, this.player.maxHealth);
+      this.player.shield = clamp(this.player.shield + this.player.maxShield * 0.5, 0, this.player.maxShield);
       this.addRipple(this.player.x, this.player.y, "player", this.player.radius + 132);
       this.spawnBurst(this.player.x, this.player.y, "player", 34, 1.55);
       this.createBases();
+    }
+
+    if (this.player.level >= 5) {
+      this.player.xp = xpCap;
     }
   }
 
@@ -1442,47 +1749,45 @@ export class Game {
   }
 
   private createArenaModifiers() {
-    const config = this.levelConfig;
-    this.createViscosityZones(config.viscosityZones);
-    this.createBlockers(config.blockers, "wall");
-    this.createBlockers(config.gates, "gate");
-    this.createEnergyWells(config.energyWells);
+    this.viscosityZones = [];
+    this.blockers = [];
+    this.energyWells = [];
   }
 
   private createNodes() {
-    const [minNodes, maxNodes] = this.levelConfig.nodes;
-    const count = maxNodes > 0 ? randomInt(minNodes, maxNodes) : 0;
-    const nodes: ControlNode[] = [];
-    let attempts = 0;
+    const count = this.levelConfig.number <= 1 ? 1 : this.levelConfig.number <= 3 ? 3 : 5;
+    const radius = this.width < 720 ? 22 : 28;
+    const centerX = (this.arena.x + this.arena.right) / 2;
+    const centerY = (this.arena.y + this.arena.bottom) / 2;
+    const spanX = this.arena.width * 0.27;
+    const spanY = this.arena.height * 0.24;
+    const placements =
+      count <= 1
+        ? [{ x: centerX, y: centerY }]
+        : count <= 3
+          ? [
+              { x: centerX, y: centerY },
+              { x: centerX - spanX, y: centerY + spanY * 0.8 },
+              { x: centerX + spanX, y: centerY - spanY * 0.8 },
+            ]
+          : [
+              { x: centerX, y: centerY },
+              { x: centerX - spanX, y: centerY + spanY * 0.8 },
+              { x: centerX + spanX, y: centerY - spanY * 0.8 },
+              { x: centerX - spanX * 0.72, y: centerY - spanY },
+              { x: centerX + spanX * 0.72, y: centerY + spanY },
+            ];
 
-    while (nodes.length < count && attempts < 160) {
-      attempts += 1;
-      const radius = this.width < 720 ? 17 : 20;
-      const x = randomRange(this.arena.x + 90, this.arena.right - 90);
-      const y = randomRange(this.arena.y + 84, this.arena.bottom - 84);
-      const tooCloseToCore =
-        distance(x, y, this.player.x, this.player.y) < 150 ||
-        this.enemies.some((enemy) => distance(x, y, enemy.x, enemy.y) < 145);
-      const tooCloseToNode = nodes.some((node) => distance(x, y, node.x, node.y) < 150);
-      const blocked = this.isInsideSolidBlocker(x, y, radius + 20);
-
-      if (tooCloseToCore || tooCloseToNode || blocked) {
-        continue;
-      }
-
-      nodes.push({
-        id: nodes.length,
-        x,
-        y,
-        radius,
-        owner: "neutral",
-        captureBy: null,
-        captureProgress: 0,
-        pulseTimer: randomRange(2.2, 5),
-      });
-    }
-
-    this.nodes = nodes;
+    this.nodes = placements.map((placement, id) => ({
+      id,
+      x: clamp(placement.x, this.arena.x + 86, this.arena.right - 86),
+      y: clamp(placement.y, this.arena.y + 82, this.arena.bottom - 82),
+      radius,
+      owner: "neutral",
+      captureBy: null,
+      captureProgress: 0,
+      pulseTimer: randomRange(2.2, 5),
+    }));
   }
 
   private createViscosityZones(count: number) {
@@ -1660,10 +1965,24 @@ export class Game {
   private updateCoreTimers(dt: number) {
     this.shieldCooldownRemaining = Math.max(0, this.shieldCooldownRemaining - dt);
     this.shieldTimer = Math.max(0, this.shieldTimer - dt);
+    this.player.breakTimer = Math.max(0, this.player.breakTimer - dt);
+    this.player.hitFlashTimer = Math.max(0, this.player.hitFlashTimer - dt);
+    this.player.shieldFlashTimer = Math.max(0, this.player.shieldFlashTimer - dt);
+    this.player.healthPulseTimer = Math.max(0, this.player.healthPulseTimer - dt);
+    this.player.effectTickTimer = Math.max(0, this.player.effectTickTimer - dt);
+    this.player.contactTimer = Math.max(0, this.player.contactTimer - dt * 0.9);
+
+    if (this.player.breakTimer > 0) {
+      this.player.combatState = "break";
+    } else if (this.player.contactTimer <= 0.02) {
+      this.player.combatState = "idle";
+    }
 
     if (this.player.invulnerableTimer > 0) {
       this.player.invulnerableTimer = Math.max(0, this.player.invulnerableTimer - dt);
     }
+
+    this.updateCoreRecovery(this.player, dt);
 
     if (this.player.isRespawning) {
       this.player.respawnTimer = Math.max(0, this.player.respawnTimer - dt);
@@ -1674,9 +1993,24 @@ export class Game {
     }
 
     for (const enemy of this.enemies) {
+      enemy.breakTimer = Math.max(0, enemy.breakTimer - dt);
+      enemy.hitFlashTimer = Math.max(0, enemy.hitFlashTimer - dt);
+      enemy.shieldFlashTimer = Math.max(0, enemy.shieldFlashTimer - dt);
+      enemy.healthPulseTimer = Math.max(0, enemy.healthPulseTimer - dt);
+      enemy.effectTickTimer = Math.max(0, enemy.effectTickTimer - dt);
+      enemy.contactTimer = Math.max(0, enemy.contactTimer - dt * 0.9);
+
+      if (enemy.breakTimer > 0) {
+        enemy.combatState = "break";
+      } else if (enemy.contactTimer <= 0.02) {
+        enemy.combatState = "idle";
+      }
+
       if (enemy.invulnerableTimer > 0) {
         enemy.invulnerableTimer = Math.max(0, enemy.invulnerableTimer - dt);
       }
+
+      this.updateCoreRecovery(enemy, dt);
 
       if (!enemy.isRespawning) {
         this.maybeLevelEnemy(enemy, dt * this.getDifficultySettings().enemyXpRate * (0.55 + this.nodes.filter((node) => node.owner === "enemy").length * 0.12));
@@ -1694,21 +2028,295 @@ export class Game {
   private updateBases(dt: number) {
     for (const base of this.bases) {
       base.pulse += dt;
+      const isPlayerBase = base.team === "player";
+      const enemyCapturingPlayerBase =
+        isPlayerBase &&
+        this.getActiveEnemies().some((enemy) => distance(enemy.x, enemy.y, base.x, base.y) < base.radius + enemy.collisionRadius + 16);
+      const playerCapturingEnemyBase =
+        !isPlayerBase && distance(this.player.x, this.player.y, base.x, base.y) < base.radius + this.player.collisionRadius + 16;
+      const capturer = enemyCapturingPlayerBase ? "enemy" : playerCapturingEnemyBase ? "player" : null;
+
+      if (!capturer) {
+        base.captureProgress = Math.max(0, base.captureProgress - dt * 0.18);
+        base.captureBy = null;
+        continue;
+      }
+
+      if (base.captureBy !== capturer) {
+        base.captureBy = capturer;
+        base.captureProgress = 0;
+      }
+
+      base.captureProgress = clamp(base.captureProgress + dt / 4.5, 0, 1);
+    }
+  }
+
+  private updateCoreRecovery(agent: Agent, dt: number) {
+    agent.combatLockoutTimer = Math.max(0, agent.combatLockoutTimer - dt);
+    agent.isInCombat = agent.combatLockoutTimer > 0;
+    agent.healthRegenPerSec = 0;
+    agent.shieldRegenPerSec = 0;
+    agent.baseProximity = this.getBaseProximity(agent);
+    agent.localTerritory = this.getLocalTerritorySupply(agent);
+
+    if (agent.isRespawning || !agent.active) {
+      agent.recoveryState = "combat";
+      return;
     }
 
-    const playerBaseDistance = distance(this.player.x, this.player.y, this.player.baseX, this.player.baseY);
+    const timeSinceCombat = this.time - Math.max(agent.lastDamageTakenAt, agent.lastDamageDealtAt, agent.lastClashAt);
+    const baseEligible = agent.baseProximity > 0 && timeSinceCombat >= BASE_REGEN_DELAY_SECONDS;
 
-    if (!this.player.isRespawning && playerBaseDistance < this.player.radius + 72) {
-      this.player.shield = clamp(this.player.shield + dt * this.player.maxShield * 0.18, 0, this.player.maxShield);
+    if (agent.isInCombat) {
+      agent.recoveryState = "combat";
+      return;
+    }
+
+    if (!baseEligible && timeSinceCombat < COMBAT_LOCKOUT_SECONDS) {
+      agent.recoveryState = "recoveryDelay";
+      return;
+    }
+
+    const baseRegen = baseEligible;
+    const territory = baseRegen ? "base" : agent.localTerritory;
+    const regen = this.getRecoveryRates(territory);
+
+    agent.recoveryState = baseRegen ? "regenBase" : regen.health > 0 || regen.shield > 0 ? "regenOwnTerritory" : "noSupply";
+    agent.healthRegenPerSec = regen.health;
+    agent.shieldRegenPerSec = regen.shield;
+
+    if (regen.health <= 0 && regen.shield <= 0) {
+      return;
+    }
+
+    const shieldMissing = Math.max(0, agent.maxShield - agent.shield);
+    const shieldRestored = Math.min(shieldMissing, regen.shield * dt);
+    agent.shield = clamp(agent.shield + shieldRestored, 0, agent.maxShield);
+
+    const shieldStillLow = agent.shield < agent.maxShield - 0.01;
+    const healthRate = shieldStillLow ? regen.health * 0.25 : regen.health;
+    agent.health = clamp(agent.health + healthRate * dt, 0, agent.maxHealth);
+  }
+
+  private getRecoveryRates(territory: TerritorySupply) {
+    if (territory === "base") {
+      return { health: 20, shield: 25 };
+    }
+
+    if (territory === "miniBase") {
+      return { health: 6, shield: 10 };
+    }
+
+    if (territory === "own") {
+      return { health: 2, shield: 6 };
+    }
+
+    if (territory === "neutral") {
+      return { health: 0, shield: 1 };
+    }
+
+    return { health: 0, shield: 0 };
+  }
+
+  private getRecoveryDelayRemaining(agent: Agent) {
+    if (agent.recoveryState !== "recoveryDelay") {
+      return 0;
+    }
+
+    const timeSinceCombat = this.time - Math.max(agent.lastDamageTakenAt, agent.lastDamageDealtAt, agent.lastClashAt);
+    const targetDelay = agent.baseProximity > 0 ? BASE_REGEN_DELAY_SECONDS : COMBAT_LOCKOUT_SECONDS;
+    return clamp(targetDelay - timeSinceCombat, 0, targetDelay);
+  }
+
+  private getBaseProximity(agent: Agent) {
+    const baseRadius = agent.kind === "player" ? 126 : 118;
+    const baseDistance = distance(agent.x, agent.y, agent.baseX, agent.baseY);
+    return clamp(1 - baseDistance / Math.max(1, baseRadius + agent.bodyRadius), 0, 1);
+  }
+
+  private getLocalTerritorySupply(agent: Agent): TerritorySupply {
+    if (this.getBaseProximity(agent) > 0) {
+      return "base";
+    }
+
+    for (const node of this.nodes) {
+      if (node.owner !== agent.kind) {
+        continue;
+      }
+
+      if (distance(agent.x, agent.y, node.x, node.y) <= node.radius + agent.bodyRadius + 58) {
+        return "miniBase";
+      }
+    }
+
+    const nearest = this.findNearestDot(agent.x, agent.y);
+
+    if (!nearest) {
+      return "neutral";
+    }
+
+    const player = nearest.playerAmount;
+    const enemy = nearest.infectionAmount;
+
+    if (player > enemy + 0.12) {
+      return agent.kind === "player" ? "own" : "enemy";
+    }
+
+    if (enemy > player + 0.12) {
+      return agent.kind === "enemy" ? "own" : "enemy";
+    }
+
+    return "neutral";
+  }
+
+  private markCoreCombat(target: Agent, source?: Agent) {
+    target.lastDamageTakenAt = this.time;
+    target.combatLockoutTimer = COMBAT_LOCKOUT_SECONDS;
+    target.isInCombat = true;
+
+    if (!source) {
+      return;
+    }
+
+    source.lastDamageDealtAt = this.time;
+    source.combatLockoutTimer = COMBAT_LOCKOUT_SECONDS;
+    source.isInCombat = true;
+  }
+
+  private revealInitialFog() {
+    this.playerFog.fill(1);
+    this.playerVisibility.fill(1);
+    this.enemyFog.fill(1);
+    this.lastPlayerFogReveal = { x: this.player.x, y: this.player.y, ready: true };
+    this.lastPlayerVisibility = { x: this.player.x, y: this.player.y, ready: true };
+
+    this.fogRevision += 1;
+  }
+
+  private updateFog() {
+    let changed = false;
+    this.fogFrameCounter = (this.fogFrameCounter + 1) % FOG_UPDATE_EVERY_FRAMES;
+    const framePulse = this.fogFrameCounter === 0;
+
+    if (!this.player.isRespawning && this.player.active) {
+      if (this.shouldRefreshVisibility(this.player.x, this.player.y, this.lastPlayerVisibility)) {
+        changed = this.updateCurrentVisibility(this.player, this.playerVisibility, this.playerVisibleDotIds, FOG_REVEAL_SCALE) || changed;
+        this.lastPlayerVisibility = { x: this.player.x, y: this.player.y, ready: true };
+      }
+
+      if (this.shouldRefreshFog(framePulse, this.player.x, this.player.y, this.lastPlayerFogReveal)) {
+        changed = this.revealFogForAgent(this.player, "player", FOG_REVEAL_SCALE) || changed;
+        this.lastPlayerFogReveal = { x: this.player.x, y: this.player.y, ready: true };
+      }
+    } else {
+      changed = this.clearVisibility(this.playerVisibility, this.playerVisibleDotIds) || changed;
     }
 
     for (const enemy of this.getActiveEnemies()) {
-      const baseDistance = distance(enemy.x, enemy.y, enemy.baseX, enemy.baseY);
+      const lastReveal = this.enemyFogRevealState.get(enemy.id) ?? { x: enemy.x, y: enemy.y, ready: false };
 
-      if (baseDistance < enemy.radius + 70) {
-        enemy.shield = clamp(enemy.shield + dt * enemy.maxShield * 0.16, 0, enemy.maxShield);
+      if (this.shouldRefreshFog(framePulse, enemy.x, enemy.y, lastReveal)) {
+        changed = this.revealFogForAgent(enemy, "enemy", FOG_REVEAL_SCALE) || changed;
+        this.enemyFogRevealState.set(enemy.id, { x: enemy.x, y: enemy.y, ready: true });
       }
     }
+
+    if (changed) {
+      this.fogRevision += 1;
+    }
+  }
+
+  private shouldRefreshVisibility(x: number, y: number, lastVisibility: { x: number; y: number; ready: boolean }) {
+    if (!lastVisibility.ready) {
+      return true;
+    }
+
+    return distance(x, y, lastVisibility.x, lastVisibility.y) >= 3;
+  }
+
+  private shouldRefreshFog(framePulse: boolean, x: number, y: number, lastReveal: { x: number; y: number; ready: boolean }) {
+    if (!lastReveal.ready) {
+      return true;
+    }
+
+    if (distance(x, y, lastReveal.x, lastReveal.y) >= FOG_REVEAL_STEP_DISTANCE) {
+      return true;
+    }
+
+    return framePulse;
+  }
+
+  private clearVisibility(visibility: Float32Array, ids: number[]) {
+    let changed = false;
+
+    for (const dotId of ids) {
+      if (visibility[dotId] > 0) {
+        visibility[dotId] = 0;
+        changed = true;
+      }
+    }
+
+    ids.length = 0;
+    return changed;
+  }
+
+  private updateCurrentVisibility(agent: Agent, visibility: Float32Array, ids: number[], radiusScale = FOG_REVEAL_SCALE) {
+    let changed = this.clearVisibility(visibility, ids);
+    const radius = agent.visionRadius * radiusScale + agent.bodyRadius * 1.5;
+    const visibleIds = this.queryDotsInRadius(agent.x, agent.y, radius, 0, this.pulseQueryBuffer);
+
+    for (const dotId of visibleIds) {
+      const dot = this.dots[dotId];
+      const visibleAmount = clamp(smoothstep(radius, radius * 0.14, dot.distanceTo(agent.x, agent.y)), 0, 1);
+
+      if (visibleAmount <= 0.025) {
+        continue;
+      }
+
+      visibility[dotId] = visibleAmount;
+      ids.push(dotId);
+      changed = true;
+    }
+
+    return changed;
+  }
+
+  private revealFogForAgent(agent: Agent, kind: AgentKind, radiusScale = FOG_REVEAL_SCALE) {
+    const fog = kind === "player" ? this.playerFog : this.enemyFog;
+    const radius = agent.visionRadius * radiusScale + agent.bodyRadius * 1.5;
+    const ids = this.queryDotsInRadius(agent.x, agent.y, radius, 0, this.pulseQueryBuffer);
+    let changed = false;
+
+    for (const dotId of ids) {
+      const dot = this.dots[dotId];
+      const visibility = smoothstep(radius, radius * 0.12, dot.distanceTo(agent.x, agent.y));
+
+      if (visibility <= 0.025 || fog[dotId] >= 1) {
+        continue;
+      }
+
+      fog[dotId] = 1;
+      changed = true;
+    }
+
+    return changed;
+  }
+
+  private getFogAt(_kind: AgentKind, _x: number, _y: number, _radius = 48) {
+    void _kind;
+    void _x;
+    void _y;
+    void _radius;
+    return 1;
+  }
+
+  private isPlayerVisibleToEnemy(_enemy: Agent) {
+    void _enemy;
+    if (this.player.isRespawning || !this.player.active) {
+      return false;
+    }
+
+    return true;
   }
 
   private updateAgents(dt: number) {
@@ -1741,7 +2349,7 @@ export class Game {
       return;
     }
 
-    const sample = this.sampleInfluence(agent.x, agent.y, agent.fieldRadius * 0.7);
+    const sample = this.sampleInfluence(agent.x, agent.y, agent.influenceRadius * 0.9);
     const viscosity = this.getViscosityAt(agent.x, agent.y);
     let terrainModifier =
       agent.kind === "player"
@@ -1788,7 +2396,7 @@ export class Game {
     const next = this.clampToArena(
       agent.x + dirX * step,
       agent.y + dirY * step,
-      agent.radius + 8,
+      agent.collisionRadius + 8,
     );
 
     agent.velocityX = (next.x - agent.x) / Math.max(dt, 0.001);
@@ -1819,7 +2427,7 @@ export class Game {
 
       const lateral = Math.abs(toX * dirY - toY * dirX);
 
-      if (lateral > blockerRadius + agent.radius + 22) {
+      if (lateral > blockerRadius + agent.collisionRadius + 22) {
         continue;
       }
 
@@ -1866,17 +2474,19 @@ export class Game {
   private chooseEnemyMode(enemy: Agent) {
     const allowed = this.levelConfig.enemyModes;
     const difficulty = this.getDifficultySettings();
-    const playerNearEnemyHome = this.sampleInfluence(enemy.homeX, enemy.homeY, enemy.fieldRadius * 1.25).player;
-    const currentEnemySample = this.sampleInfluence(enemy.x, enemy.y, enemy.fieldRadius);
+    const playerNearEnemyHome = this.sampleInfluence(enemy.homeX, enemy.homeY, enemy.influenceRadius * 1.25).player;
+    const currentEnemySample = this.sampleInfluence(enemy.x, enemy.y, enemy.influenceRadius);
     const healthRatio = enemy.health / Math.max(1, enemy.maxHealth);
+    const playerKnown = this.isPlayerVisibleToEnemy(enemy);
     const playerWeak =
-      this.player.health / Math.max(1, this.player.maxHealth) < 0.44 ||
-      this.sampleInfluence(this.player.x, this.player.y, this.player.fieldRadius).player < 0.24;
+      playerKnown &&
+      (this.player.health / Math.max(1, this.player.maxHealth) < 0.44 ||
+        this.sampleInfluence(this.player.x, this.player.y, this.player.influenceRadius).player < 0.24);
     const attackChance =
       (enemy.type === "hunter" ? 0.24 : enemy.type === "splitter" ? 0.16 : 0.08) *
       difficulty.aggression *
       (playerWeak ? 1.9 : 1);
-    const shouldAttack = allowed.includes("attack") && Math.random() < attackChance && this.elapsedSeconds > 18;
+    const shouldAttack = playerKnown && allowed.includes("attack") && Math.random() < attackChance && this.elapsedSeconds > 18;
     const canContest = allowed.includes("contest") && this.findBestFrontlineDot(enemy);
 
     if (healthRatio < difficulty.retreatHealth) {
@@ -1904,17 +2514,18 @@ export class Game {
     const arenaDiagonal = Math.hypot(this.arena.width, this.arena.height);
     const healthRatio = enemy.health / Math.max(1, enemy.maxHealth);
     const playerHealthRatio = this.player.health / Math.max(1, this.player.maxHealth);
-    const playerTerritory = this.sampleInfluence(this.player.x, this.player.y, this.player.fieldRadius).player;
+    const playerKnown = this.isPlayerVisibleToEnemy(enemy);
+    const playerTerritory = playerKnown ? this.sampleInfluence(this.player.x, this.player.y, this.player.influenceRadius).player : 0.5;
     const playerWeaknessValue = (1 - playerHealthRatio) * 2 + (playerTerritory < 0.22 ? 0.8 : 0);
     const candidates: Array<{ x: number; y: number; label: string; score: number }> = [];
 
     const addCandidate = (x: number, y: number, label: string, value: number) => {
-      const target = this.findOpenPoint(x, y, enemy.radius + 10);
-      const targetSample = this.sampleInfluence(target.x, target.y, enemy.fieldRadius * 0.75);
+      const target = this.findOpenPoint(x, y, enemy.collisionRadius + 10);
+      const targetSample = this.sampleInfluence(target.x, target.y, enemy.influenceRadius * 0.9);
       const targetDistance = distance(enemy.x, enemy.y, target.x, target.y);
       const distanceCost = targetDistance / Math.max(1, arenaDiagonal) * 2.1;
       const safetyValue = targetSample.infection * 0.95 - targetSample.player * (enemy.type === "tank" ? 0.35 : 0.9);
-      const supportValue = this.countNearbyEnemies(target.x, target.y, enemy.fieldRadius * 1.4, enemy.id) * 0.28;
+      const supportValue = this.countNearbyEnemies(target.x, target.y, enemy.visionRadius * 0.9, enemy.id) * 0.28;
       candidates.push({
         x: target.x,
         y: target.y,
@@ -1976,10 +2587,10 @@ export class Game {
       addCandidate(expand.baseX, expand.baseY, "expand:cluster", 2.2 + (enemy.mode === "expand" ? 0.8 : 0));
     }
 
-    if (this.levelConfig.number >= 3 && this.elapsedSeconds > 18 && !this.player.isRespawning) {
+    if (playerKnown && this.levelConfig.number >= 3 && this.elapsedSeconds > 18 && !this.player.isRespawning) {
       const favorableFight =
         healthRatio > playerHealthRatio + 0.08 ||
-        this.sampleInfluence(enemy.x, enemy.y, enemy.fieldRadius).infection > 0.38 ||
+        this.sampleInfluence(enemy.x, enemy.y, enemy.influenceRadius).infection > 0.38 ||
         enemy.type === "hunter";
       const huntAllowed = Math.random() < difficulty.huntChance || enemy.mode === "attack";
 
@@ -1994,12 +2605,12 @@ export class Game {
       }
     }
 
-    if (this.levelConfig.number >= 6 && difficulty.aggression > 0.9) {
+    if (this.levelConfig.number >= 6 && difficulty.aggression > 0.9 && this.getFogAt("enemy", this.player.baseX, this.player.baseY, 64) > 0.34) {
       addCandidate(this.player.baseX, this.player.baseY, "pressure:player-base", 1.2 * difficulty.aggression);
     }
 
     if (candidates.length === 0) {
-      const fallback = this.findOpenPoint(enemy.baseX, enemy.baseY, enemy.radius + 10);
+      const fallback = this.findOpenPoint(enemy.baseX, enemy.baseY, enemy.collisionRadius + 10);
       enemy.selectedTarget = "fallback:base";
       enemy.targetScore = 0;
       return fallback;
@@ -2048,7 +2659,7 @@ export class Game {
       }
     }
 
-    return bestNode ? this.findOpenPoint(bestNode.x, bestNode.y, enemy.radius + 10) : null;
+    return bestNode ? this.findOpenPoint(bestNode.x, bestNode.y, enemy.collisionRadius + 10) : null;
   }
 
   private findBestFrontlineDot(enemy: Agent) {
@@ -2117,7 +2728,7 @@ export class Game {
     const dx = b.x - a.x;
     const dy = b.y - a.y;
     const coreDistance = Math.max(0.001, Math.hypot(dx, dy));
-    const minDistance = a.radius + b.radius + (isPlayerEnemy ? 13 : 8);
+    const minDistance = a.collisionRadius + b.collisionRadius + (isPlayerEnemy ? 3 : 2);
 
     if (coreDistance >= minDistance) {
       return;
@@ -2131,7 +2742,7 @@ export class Game {
     const bShare = a.canMove ? a.mass / totalMass : 0;
 
     if (a.canMove) {
-      const nextA = this.clampToArena(a.x - nx * overlap * aShare, a.y - ny * overlap * aShare, a.radius + 8);
+      const nextA = this.clampToArena(a.x - nx * overlap * aShare, a.y - ny * overlap * aShare, a.collisionRadius + 8);
       a.x = nextA.x;
       a.y = nextA.y;
       a.targetX = a.kind === "player" ? a.x : a.targetX;
@@ -2139,7 +2750,7 @@ export class Game {
     }
 
     if (b.canMove) {
-      const nextB = this.clampToArena(b.x + nx * overlap * bShare, b.y + ny * overlap * bShare, b.radius + 8);
+      const nextB = this.clampToArena(b.x + nx * overlap * bShare, b.y + ny * overlap * bShare, b.collisionRadius + 8);
       b.x = nextB.x;
       b.y = nextB.y;
       b.targetX = b.x + nx * 42;
@@ -2157,30 +2768,11 @@ export class Game {
       this.addContestedZone(x, y, 96);
     }
 
-    if (isPlayerEnemy) {
-      this.applyClashDamage(a, b, dt);
-    }
+    void dt;
   }
 
-  private applyClashDamage(player: Agent, enemy: Agent, dt: number) {
-    if (
-      player.invulnerableTimer > 0 ||
-      enemy.invulnerableTimer > 0 ||
-      player.isRespawning ||
-      enemy.isRespawning
-    ) {
-      return;
-    }
-
-    const playerPower = this.getCombatPower(player, enemy);
-    const enemyPower = this.getCombatPower(enemy, player) * this.getDifficultySettings().clashPressure;
-    const clashScale = dt * 0.016;
-    this.applyCoreDamage(enemy, playerPower * clashScale, player);
-    this.applyCoreDamage(player, enemyPower * clashScale, enemy);
-  }
-
-  private getCombatPower(agent: Agent, opponent: Agent) {
-    const sample = this.sampleInfluence(agent.x, agent.y, agent.fieldRadius * 0.72);
+  private getCombatDamagePerSecond(agent: Agent, opponent: Agent) {
+    const sample = this.sampleInfluence(agent.x, agent.y, agent.influenceRadius * 0.9);
     const ownTerritory = agent.kind === "player" ? sample.player : sample.infection;
     const enemyTerritory = agent.kind === "player" ? sample.infection : sample.player;
     const territoryBonus = ownTerritory > 0.45 ? 1.15 : enemyTerritory > 0.45 ? 0.85 : 1;
@@ -2188,7 +2780,72 @@ export class Game {
     const nodeBonus = 1 + nodeCount * 0.035;
     const shieldBonus = agent.shield > agent.maxShield * 0.45 ? 1.08 : 1;
     const healthPressure = opponent.health < opponent.maxHealth * 0.35 ? 1.08 : 1;
-    return (agent.power + agent.level * 10) * territoryBonus * nodeBonus * shieldBonus * healthPressure;
+    return agent.power * territoryBonus * nodeBonus * shieldBonus * healthPressure;
+  }
+
+  private updateCombatState(agent: Agent, opponent: Agent, contactTime: number, overpowering: boolean) {
+    agent.contactTimer = Math.max(agent.contactTimer, contactTime);
+
+    if (agent.breakTimer > 0) {
+      agent.combatState = "break";
+      return;
+    }
+
+    if (overpowering && contactTime >= 0.5) {
+      agent.combatState = "overpower";
+      return;
+    }
+
+    agent.combatState = contactTime >= 0.5 ? "clash" : "contact";
+
+    if (contactTime >= 0.5 && overpowering && opponent.canMove) {
+      const dx = opponent.x - agent.x;
+      const dy = opponent.y - agent.y;
+      const length = Math.max(0.001, Math.hypot(dx, dy));
+      const push = 8;
+      const target = this.clampToArena(
+        opponent.x + (dx / length) * push,
+        opponent.y + (dy / length) * push,
+        opponent.collisionRadius + 8,
+      );
+      opponent.x = target.x;
+      opponent.y = target.y;
+    }
+  }
+
+  private emitCombatEffects(
+    player: Agent,
+    enemy: Agent,
+    midpointX: number,
+    midpointY: number,
+    sustained: boolean,
+    playerDamage: number,
+    enemyDamage: number,
+  ) {
+    const cadence = sustained ? 0.1 : 0.18;
+
+    if (player.effectTickTimer > 0 && enemy.effectTickTimer > 0) {
+      return;
+    }
+
+    player.effectTickTimer = cadence;
+    enemy.effectTickTimer = cadence;
+    const advantageKind: ParticleKind =
+      playerDamage > enemyDamage * 1.12
+        ? "clashPlayer"
+        : enemyDamage > playerDamage * 1.12
+          ? "clashEnemy"
+          : "clashEven";
+    this.addRipple(midpointX, midpointY, "collision", sustained ? 34 : 24);
+    this.addParticle(midpointX + randomRange(-7, 7), midpointY + randomRange(-7, 7), advantageKind, sustained ? 1.05 : 0.76);
+
+    if (sustained) {
+      this.addParticle(midpointX + randomRange(-8, 8), midpointY + randomRange(-8, 8), advantageKind, 0.82);
+    }
+
+    if (sustained) {
+      this.addContestedZone(midpointX, midpointY, 54);
+    }
   }
 
   private resolveAgentBlockers(agent: Agent) {
@@ -2202,7 +2859,7 @@ export class Game {
       const dx = agent.x - blocker.x;
       const dy = agent.y - blocker.y;
       const agentDistance = Math.max(0.001, Math.hypot(dx, dy));
-      const minDistance = agent.radius + blockerRadius + 4;
+      const minDistance = agent.collisionRadius + blockerRadius + 4;
 
       if (agentDistance >= minDistance) {
         continue;
@@ -2212,7 +2869,7 @@ export class Game {
       const next = this.clampToArena(
         agent.x + (dx / agentDistance) * push,
         agent.y + (dy / agentDistance) * push,
-        agent.radius + 8,
+        agent.collisionRadius + 8,
       );
       agent.x = next.x;
       agent.y = next.y;
@@ -2241,14 +2898,14 @@ export class Game {
     }
 
     const playerSuppression = nearestEnemy
-      ? smoothstep(nearestEnemy.fieldRadius * 0.78, 0, nearestDistance) * 0.18
+      ? smoothstep(nearestEnemy.influenceRadius * 0.92, 0, nearestDistance) * 0.18
       : 0;
 
     this.player.intensity = clamp(1 - playerSuppression, 0.72, 1);
 
     for (const enemy of activeEnemies) {
       const duelDistance = distance(this.player.x, this.player.y, enemy.x, enemy.y);
-      const suppression = smoothstep(enemy.fieldRadius * 0.82, 0, duelDistance) * 0.42;
+      const suppression = smoothstep(enemy.influenceRadius, 0, duelDistance) * 0.42;
       enemy.intensity = clamp(0.96 - suppression, 0.38, 0.98);
     }
 
@@ -2256,7 +2913,7 @@ export class Game {
       active: true,
       x: this.player.x,
       y: this.player.y,
-      radius: this.player.fieldRadius,
+      radius: this.player.influenceRadius,
       intensity: this.player.intensity,
     };
 
@@ -2275,16 +2932,16 @@ export class Game {
       active: true,
       x: nearestEnemy.x,
       y: nearestEnemy.y,
-      radius: nearestEnemy.fieldRadius,
+      radius: nearestEnemy.influenceRadius,
       intensity: nearestEnemy.intensity,
     };
   }
 
   private updateNodes(dt: number) {
     for (const node of this.nodes) {
-      const playerInside = distance(this.player.x, this.player.y, node.x, node.y) < node.radius + this.player.radius + 6;
+      const playerInside = distance(this.player.x, this.player.y, node.x, node.y) < node.radius + this.player.collisionRadius + 6;
       const enemyInside = this.getActiveEnemies().some(
-        (enemy) => distance(enemy.x, enemy.y, node.x, node.y) < node.radius + enemy.radius + 6,
+        (enemy) => distance(enemy.x, enemy.y, node.x, node.y) < node.radius + enemy.collisionRadius + 6,
       );
       const capturer = playerInside && !enemyInside ? "player" : enemyInside && !playerInside ? "enemy" : null;
 
@@ -2305,10 +2962,10 @@ export class Game {
           node.captureBy = null;
           node.pulseTimer = 0.35;
           if (capturer === "player") {
-            this.grantPlayerXp(45);
+            this.grantPlayerXp(XP_NODE_CAPTURED);
           } else {
             for (const enemy of this.getActiveEnemies()) {
-              if (distance(enemy.x, enemy.y, node.x, node.y) < enemy.fieldRadius + node.radius + 20) {
+              if (distance(enemy.x, enemy.y, node.x, node.y) < enemy.influenceRadius + node.radius + 20) {
                 this.maybeLevelEnemy(enemy, 28 * this.getDifficultySettings().enemyXpRate);
               }
             }
@@ -2365,7 +3022,7 @@ export class Game {
   }
 
   private pulseEnemy(enemy: Agent) {
-    const radius = enemy.type === "root" ? enemy.fieldRadius * 1.35 : enemy.fieldRadius * 1.18;
+    const radius = enemy.type === "root" ? enemy.influenceRadius * 1.65 : enemy.influenceRadius * 1.38;
     const power = enemy.type === "spreader" ? 0.24 : enemy.type === "hunter" ? 0.13 : 0.19;
 
     this.addPulse({
@@ -2394,7 +3051,7 @@ export class Game {
       const dy = dot.baseY - enemy.y;
       const dotDistance = Math.hypot(dx, dy);
 
-      if (dotDistance <= enemy.radius || dotDistance > length) {
+      if (dotDistance <= enemy.bodyRadius || dotDistance > length) {
         continue;
       }
 
@@ -2558,11 +3215,17 @@ export class Game {
       enemy.slowTimer = Math.max(enemy.slowTimer, pulse.kind === "shockwave" ? 1.1 : 0.42);
 
       if (pulse.kind === "shockwave" && enemy.canMove) {
+        enemy.lastClashAt = this.time;
+        enemy.combatLockoutTimer = COMBAT_LOCKOUT_SECONDS;
+        this.player.lastDamageDealtAt = this.time;
+        enemy.breakTimer = Math.max(enemy.breakTimer, 0.42 + edge * 0.18);
+        enemy.combatState = "break";
+        enemy.hitFlashTimer = Math.max(enemy.hitFlashTimer, 0.18);
         const dx = enemy.x - pulse.x;
         const dy = enemy.y - pulse.y;
         const length = Math.max(0.001, Math.hypot(dx, dy));
         const push = 52 + edge * 68;
-        const target = this.clampToArena(enemy.x + (dx / length) * push, enemy.y + (dy / length) * push, enemy.radius + 10);
+        const target = this.clampToArena(enemy.x + (dx / length) * push, enemy.y + (dy / length) * push, enemy.collisionRadius + 10);
         enemy.targetX = target.x;
         enemy.targetY = target.y;
       }
@@ -2574,7 +3237,7 @@ export class Game {
   }
 
   private cleanseWithPlayer(dt: number) {
-    const sample = this.sampleInfluence(this.player.x, this.player.y, this.player.fieldRadius * 0.72);
+    const sample = this.sampleInfluence(this.player.x, this.player.y, this.player.influenceRadius * 0.9);
     const homeBonus = sample.player > 0.45 ? 1.15 : 1;
     const wellBonus = this.getEnergyWellBonus();
     const viscosity = this.getViscosityAt(this.player.x, this.player.y);
@@ -2582,13 +3245,19 @@ export class Game {
     for (const dot of this.dots) {
       const playerDistance = dot.distanceTo(this.player.x, this.player.y);
 
-      if (playerDistance >= this.player.fieldRadius) {
+      if (playerDistance >= this.player.influenceRadius) {
         continue;
       }
 
       const localViscosity = this.dotViscosity[dot.id] ?? 0;
-      const influence = smoothstep(this.player.fieldRadius, 0, playerDistance) * this.player.intensity;
-      const cleansePower = influence * dt * 1.02 * homeBonus * wellBonus * (1 + Math.max(viscosity, localViscosity) * 0.9);
+      const influence = smoothstep(this.player.influenceRadius, 0, playerDistance) * this.player.intensity;
+      const cleansePower =
+        influence *
+        dt *
+        DIRECT_CLEANSE_SCALE *
+        homeBonus *
+        wellBonus *
+        (1 + Math.max(viscosity, localViscosity) * 0.9);
 
       if (dot.infectionAmount > 0) {
         const before = dot.infectionAmount;
@@ -2599,12 +3268,11 @@ export class Game {
           dot.infectionAmount = 0;
           dot.playerAmount = Math.max(dot.playerAmount, 0.84);
           dot.state = "player";
-          this.grantPlayerXp(2.4);
           this.addRipple(dot.x, dot.y, "player");
           this.addParticle(dot.x, dot.y, "player", 1.25);
         }
       } else {
-        dot.playerAmount = clamp(dot.playerAmount + influence * dt * 0.74 * homeBonus * wellBonus, 0, 1);
+        dot.playerAmount = clamp(dot.playerAmount + influence * dt * DIRECT_CLEANSE_SCALE * 0.72 * homeBonus * wellBonus, 0, 1);
       }
     }
 
@@ -2614,14 +3282,50 @@ export class Game {
   private damageEnemiesNearPlayer(dt: number) {
     for (const enemy of this.getActiveEnemies()) {
       const playerDistance = distance(this.player.x, this.player.y, enemy.x, enemy.y);
+      const combatRange = this.player.combatRadius + enemy.combatRadius;
 
-      if (playerDistance >= this.player.fieldRadius + enemy.radius) {
+      if (playerDistance > combatRange) {
         continue;
       }
 
-      const influence = smoothstep(this.player.fieldRadius + enemy.radius, 0, playerDistance);
-      const tankResistance = enemy.type === "tank" ? 0.42 : 1;
-      this.damageEnemy(enemy, influence * dt * 0.11 * tankResistance);
+      if (
+        this.player.invulnerableTimer > 0 ||
+        enemy.invulnerableTimer > 0 ||
+        this.player.isRespawning ||
+        enemy.isRespawning
+      ) {
+        continue;
+      }
+
+      const bodyRange = this.player.bodyRadius + enemy.bodyRadius;
+      const falloffDistance = Math.max(1, combatRange - bodyRange);
+      const engagement =
+        playerDistance <= bodyRange
+          ? 1
+          : clamp(1 - (playerDistance - bodyRange) / falloffDistance, 0.35, 1);
+      const playerDamage = this.getCombatDamagePerSecond(this.player, enemy) * engagement;
+      const enemyDamage = this.getCombatDamagePerSecond(enemy, this.player) * this.getDifficultySettings().clashPressure * engagement;
+      const contactTime = Math.min(Math.max(this.player.contactTimer, enemy.contactTimer) + dt, 1.6);
+      const sustained = contactTime >= 0.5;
+      const playerOverpowering = playerDamage > enemyDamage * 1.35;
+      const enemyOverpowering = enemyDamage > playerDamage * 1.35;
+      const midpointX = (this.player.x + enemy.x) / 2;
+      const midpointY = (this.player.y + enemy.y) / 2;
+
+      this.player.lastClashAt = this.time;
+      this.player.combatLockoutTimer = COMBAT_LOCKOUT_SECONDS;
+      enemy.lastClashAt = this.time;
+      enemy.combatLockoutTimer = COMBAT_LOCKOUT_SECONDS;
+      this.updateCombatState(this.player, enemy, contactTime, playerOverpowering);
+      this.updateCombatState(enemy, this.player, contactTime, enemyOverpowering);
+      this.emitCombatEffects(this.player, enemy, midpointX, midpointY, sustained, playerDamage, enemyDamage);
+
+      if (this.player.breakTimer > 0 || enemy.breakTimer > 0) {
+        continue;
+      }
+
+      this.applyCoreDamage(enemy, playerDamage * dt, this.player);
+      this.applyCoreDamage(this.player, enemyDamage * dt, enemy);
     }
   }
 
@@ -2638,17 +3342,25 @@ export class Game {
       return;
     }
 
-    const shieldDamageReduction = target.kind === "player" && this.shieldTimer > 0 ? 0.58 : 1;
-    let remaining = amount * shieldDamageReduction;
+    this.markCoreCombat(target, source);
+    const incomingMultiplier = target.kind === "player" && this.shieldTimer > 0 ? 0.5 : 1;
+    let remaining = amount * incomingMultiplier;
 
     if (target.shield > 0) {
       const shieldHit = Math.min(target.shield, remaining);
       target.shield -= shieldHit;
       remaining -= shieldHit;
+
+      if (shieldHit > 0) {
+        target.shieldFlashTimer = Math.max(target.shieldFlashTimer, 0.18);
+      }
     }
 
     if (remaining > 0) {
       target.health = clamp(target.health - remaining, 0, target.maxHealth);
+      target.hitFlashTimer = Math.max(target.hitFlashTimer, 0.16);
+      target.healthPulseTimer = Math.max(target.healthPulseTimer, 0.22);
+      this.addRipple(target.x, target.y, target.kind, target.bodyRadius + 14);
     }
 
     if (target.health > 0) {
@@ -2679,10 +3391,10 @@ export class Game {
     this.enemyDeaths += 1;
     this.addRipple(enemy.x, enemy.y, "enemy", enemy.radius + 118);
     this.spawnBurst(enemy.x, enemy.y, "enemy", 42, 1.55);
-    this.neutralizeNearbyDots(enemy.x, enemy.y, enemy.fieldRadius * 0.85, "enemy", 0.34);
+    this.neutralizeNearbyDots(enemy.x, enemy.y, enemy.influenceRadius * 1.1, "enemy", 0.34);
 
     if (killedByPlayer) {
-      this.grantPlayerXp(110 + enemy.level * 38);
+      this.grantPlayerXp(XP_ENEMY_KILL);
     }
   }
 
@@ -2739,11 +3451,22 @@ export class Game {
       const position = this.findOpenPoint(
         enemy.x + Math.cos(angle) * 42,
         enemy.y + Math.sin(angle) * 42,
-        child.radius + 10,
+        child.bodyRadius + 10,
       );
+      child.baseRadius = 11;
+      child.baseCombatRadius = 22;
+      child.bodyRadius = 11;
+      child.collisionRadius = 13;
+      child.combatRadius = 22;
       child.radius = 11;
-      child.fieldRadius = this.width < 720 ? 58 : 68;
-      child.speed = (this.width < 720 ? 86 : 108) * config.enemySpeedScale;
+      const childLegacyFieldRadius = this.width < 720 ? 58 : 68;
+      child.baseInfluenceRadius = childLegacyFieldRadius * 0.5;
+      child.baseVisionRadius = Math.max(childLegacyFieldRadius * 1.25, child.baseInfluenceRadius + 54);
+      child.influenceRadius = child.baseInfluenceRadius;
+      child.visionRadius = child.baseVisionRadius;
+      child.fieldRadius = child.influenceRadius;
+      child.speed = (this.width < 720 ? 86 : 108) * config.enemySpeedScale * CORE_SPEED_SCALE;
+      child.moveSpeed = child.speed;
       child.mass = 0.72;
       child.x = position.x;
       child.y = position.y;
@@ -2770,7 +3493,7 @@ export class Game {
     const difficultyPressure = this.getDifficultySettings().infectionPressure;
 
     for (const enemy of this.getActiveEnemies()) {
-      const sample = this.sampleInfluence(enemy.x, enemy.y, enemy.fieldRadius * 0.72);
+      const sample = this.sampleInfluence(enemy.x, enemy.y, enemy.influenceRadius * 0.9);
       let territoryModifier = 1;
 
       if (sample.player > 0.45) {
@@ -2784,16 +3507,16 @@ export class Game {
       for (const dot of this.dots) {
         const enemyDistance = dot.distanceTo(enemy.x, enemy.y);
 
-        if (enemyDistance >= enemy.fieldRadius) {
+        if (enemyDistance >= enemy.influenceRadius) {
           continue;
         }
 
         const localViscosity = this.dotViscosity[dot.id] ?? 0;
-        const influence = smoothstep(enemy.fieldRadius, 0, enemyDistance) * enemy.intensity;
+        const influence = smoothstep(enemy.influenceRadius, 0, enemyDistance) * enemy.intensity;
         const infectionPower =
           influence *
           dt *
-          0.66 *
+          DIRECT_INFECT_SCALE *
           enemy.spreadPower *
           territoryModifier *
           overtime *
@@ -2884,11 +3607,11 @@ export class Game {
         continue;
       }
 
-      const playerInfluence = smoothstep(this.player.fieldRadius, 0, dot.distanceTo(this.player.x, this.player.y));
+      const playerInfluence = smoothstep(this.player.influenceRadius, 0, dot.distanceTo(this.player.x, this.player.y));
       let enemyInfluence = 0;
 
       for (const enemy of this.getActiveEnemies()) {
-        enemyInfluence = Math.max(enemyInfluence, smoothstep(enemy.fieldRadius, 0, dot.distanceTo(enemy.x, enemy.y)) * enemy.intensity);
+        enemyInfluence = Math.max(enemyInfluence, smoothstep(enemy.influenceRadius, 0, dot.distanceTo(enemy.x, enemy.y)) * enemy.intensity);
       }
 
       exposure *= 1 - playerInfluence * this.player.intensity * 0.7;
@@ -2908,7 +3631,7 @@ export class Game {
       return;
     }
 
-    const sample = this.sampleInfluence(this.player.x, this.player.y, this.player.fieldRadius * 0.72);
+    const sample = this.sampleInfluence(this.player.x, this.player.y, this.player.influenceRadius * 0.9);
     const rechargeBonus = sample.player > 0.45 ? 1.25 : 1;
     const nodeBonus = this.nodes.filter((node) => node.owner === "player").length * 0.08;
     const wellBonus = this.getEnergyWellBonus();
@@ -2934,6 +3657,8 @@ export class Game {
   }
 
   private resolveStates() {
+    let fogChanged = false;
+
     for (const dot of this.dots) {
       const previousState = dot.state;
       const contested = dot.playerAmount > 0.18 && dot.infectionAmount > 0.18;
@@ -2966,8 +3691,21 @@ export class Game {
       dot.state = nextState;
 
       if (previousState !== nextState && nextState !== "neutral") {
+        if (previousState === "infected" && nextState === "player") {
+          this.grantPlayerXp(XP_DOT_CLEANSED);
+        }
+
         this.addParticle(dot.x, dot.y, nextState === "player" ? "player" : "enemy", 1.1);
       }
+
+      if (nextState === "player" && this.playerFog[dot.id] < 1) {
+        this.playerFog[dot.id] = 1;
+        fogChanged = true;
+      }
+    }
+
+    if (fogChanged) {
+      this.fogRevision += 1;
     }
   }
 
@@ -3025,16 +3763,17 @@ export class Game {
   }
 
   private checkOutcome() {
-    const stats = this.getStats();
-    const infectedRatio = stats.infectedCount / stats.totalDots;
-    const playerRatio = stats.cleansedCount / stats.totalDots;
+    const playerBase = this.bases.find((base) => base.team === "player");
+    const enemyBaseCaptured = this.bases.some(
+      (base) => base.team === "enemy" && base.captureBy === "player" && base.captureProgress >= 1,
+    );
 
-    if (playerRatio >= 0.7) {
+    if (enemyBaseCaptured) {
       this.status = "won";
       return;
     }
 
-    if (infectedRatio >= 0.75) {
+    if (playerBase?.captureBy === "enemy" && playerBase.captureProgress >= 1) {
       this.status = "lost";
     }
   }
@@ -3161,7 +3900,7 @@ export class Game {
     });
   }
 
-  private addParticle(x: number, y: number, kind: AgentKind, size = 1) {
+  private addParticle(x: number, y: number, kind: ParticleKind, size = 1) {
     while (this.particles.length >= MAX_PARTICLES) {
       this.particles.shift();
     }
@@ -3181,7 +3920,7 @@ export class Game {
     });
   }
 
-  private spawnBurst(x: number, y: number, kind: AgentKind, count: number, size = 1) {
+  private spawnBurst(x: number, y: number, kind: ParticleKind, count: number, size = 1) {
     const capped = Math.max(0, Math.min(count, 54, MAX_PARTICLES - this.particles.length));
 
     for (let index = 0; index < capped; index += 1) {
@@ -3281,6 +4020,47 @@ export class Game {
     return out;
   }
 
+  private findNearestDot(x: number, y: number): Dot | null {
+    const cellX = Math.floor(x / DOT_GRID_CELL_SIZE);
+    const cellY = Math.floor(y / DOT_GRID_CELL_SIZE);
+    let nearest: Dot | null = null;
+    let nearestDistanceSq = Number.POSITIVE_INFINITY;
+
+    for (let radius = 0; radius <= 2; radius += 1) {
+      for (let yOffset = -radius; yOffset <= radius; yOffset += 1) {
+        for (let xOffset = -radius; xOffset <= radius; xOffset += 1) {
+          if (Math.max(Math.abs(xOffset), Math.abs(yOffset)) !== radius) {
+            continue;
+          }
+
+          const bucket = this.dotGrid.get(`${cellX + xOffset}:${cellY + yOffset}`);
+
+          if (!bucket) {
+            continue;
+          }
+
+          for (const dotId of bucket) {
+            const dot = this.dots[dotId];
+            const dx = dot.baseX - x;
+            const dy = dot.baseY - y;
+            const distanceSq = dx * dx + dy * dy;
+
+            if (distanceSq < nearestDistanceSq) {
+              nearest = dot;
+              nearestDistanceSq = distanceSq;
+            }
+          }
+        }
+      }
+
+      if (nearest) {
+        return nearest;
+      }
+    }
+
+    return nearest;
+  }
+
   private getDotGridKey(x: number, y: number) {
     return `${Math.floor(x / DOT_GRID_CELL_SIZE)}:${Math.floor(y / DOT_GRID_CELL_SIZE)}`;
   }
@@ -3319,7 +4099,7 @@ export class Game {
     for (const well of this.energyWells) {
       const wellDistance = distance(this.player.x, this.player.y, well.x, well.y);
 
-      if (wellDistance > well.radius + this.player.radius + 20) {
+      if (wellDistance > well.radius + this.player.collisionRadius + 20) {
         continue;
       }
 

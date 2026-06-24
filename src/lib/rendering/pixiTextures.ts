@@ -9,6 +9,7 @@ export type PixiTextures = {
   cores: Record<CoreTextureKey, Texture>;
   particle: Texture;
   ring: Texture;
+  fogReveal: Texture;
 };
 
 function rgbToCss(color: Rgb, alpha: number) {
@@ -129,6 +130,19 @@ function createRingTexture() {
   });
 }
 
+function createFogRevealTexture() {
+  return createCanvasTexture(160, (ctx, size) => {
+    const center = size / 2;
+    const glow = ctx.createRadialGradient(center, center, 0, center, center, center);
+    glow.addColorStop(0, "rgba(255, 255, 255, 0.98)");
+    glow.addColorStop(0.52, "rgba(255, 255, 255, 0.72)");
+    glow.addColorStop(0.82, "rgba(255, 255, 255, 0.22)");
+    glow.addColorStop(1, "rgba(255, 255, 255, 0)");
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, size, size);
+  });
+}
+
 export function createPixiTextures(): PixiTextures {
   return {
     dots: {
@@ -143,6 +157,7 @@ export function createPixiTextures(): PixiTextures {
     },
     particle: createParticleTexture(),
     ring: createRingTexture(),
+    fogReveal: createFogRevealTexture(),
   };
 }
 
@@ -151,4 +166,5 @@ export function destroyPixiTextures(textures: PixiTextures) {
   Object.values(textures.cores).forEach((texture) => texture.destroy(true));
   textures.particle.destroy(true);
   textures.ring.destroy(true);
+  textures.fogReveal.destroy(true);
 }
