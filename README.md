@@ -2,19 +2,29 @@
 
 Color Infection is a web-based 2D territorial puzzle prototype built with Next.js App Router, TypeScript, React, PixiJS, and Tailwind CSS.
 
-## Version 1.15
+## Version 1.19
 
-Version 1.15 is the Fog Removal pass. It preserves the V1.13 simplified base-capture arena, core movement/combat, recovery feedback, PixiJS renderer, dark glass HUD, controls, pause/reset, and diagnostics while removing fog-of-war and haze as active rendering systems.
+Version 1.19 is the Strategic Base AI and Support Bot pass. It builds on V1.18 with chainable desktop-safe mini-base placement, repaired supplied mini-base healing, a support bot deploy ability, pulse-timed enemy reveal, and a more utility-driven enemy objective brain.
 
-The main V1.15 diagnosis: the temporary Fog FX toggle confirmed that full-screen fog/haze visuals were the FPS culprit. With the map fully uncovered, turning fog back on immediately reintroduced frame drops. Fog and haze are now removed from the active frame path.
+The main V1.19 direction: the arena should play more like a deliberate capture-the-base strategy game. Mini-bases now form usable supply chains, support bots can help contest the map without capturing main bases, and enemy bots evaluate capture, defense, recovery, interception, and pressure goals instead of only drifting toward obvious targets.
 
-V1.13 base capture, V1.12 recovery feedback, V1.10 recovery, V1.09 radius readability, V1.08 dark glass UI, V1.07 hold-and-drag movement, V1.06 core combat, and V1.05 pulse/spike optimizations remain in place.
+V1.18 combat fixes, V1.17 start flow, V1.16 strategic bases, V1.15 fog removal, V1.13 base capture, V1.12 recovery feedback, V1.10 recovery, V1.09 radius readability, V1.08 dark glass UI, V1.07 hold-and-drag movement, V1.06 core combat, and V1.05 pulse/spike optimizations remain in place.
 
 The architecture is intentionally split:
 
-- `Game.ts` owns simulation state, level generation, dots, cores, infection, cleansing, enemy AI, collisions, nodes, modifiers, pulses, win/loss rules, pause/reset, and debug stats.
-- Pixi rendering owns the animated scene: application lifecycle, layers, textures, sprites, pooled visual effects, haze, resize handling, and cleanup.
-- React owns layout, HUD, pause/reset/shockwave buttons, level controls, mobile controls, keyboard shortcuts, and the diagnostics overlay.
+- `Game.ts` owns simulation state, level generation, cores, base capture, supply, enemy AI, collisions, nodes, pulses, win/loss rules, pause/reset, and debug stats.
+- Pixi rendering owns the animated scene: application lifecycle, layers, textures, sprites, pooled visual effects, resize handling, and cleanup.
+- React owns layout, start screen, level select, HUD, pause/reset/shockwave buttons, mobile controls, keyboard shortcuts, and the diagnostics overlay.
+
+### Start Flow
+
+- The app now opens on a dark glass home screen instead of immediately dropping the player into live gameplay.
+- Press `Start` to open level select.
+- Level select shows all six designed arena levels with their names, summaries, and enemy counts.
+- Starting a level resets that level and unpauses the simulation.
+- The in-game navbar includes Home and Levels controls, letting the player pause live gameplay and return to the menu flow without reloading the page.
+- `Continue Level` starts the currently selected level from the home screen.
+- The old in-navbar previous/next level switcher has been removed so level changes happen through level select.
 
 ### Current Gameplay
 
@@ -28,32 +38,47 @@ The architecture is intentionally split:
   - hold/drag with a finger to steer,
   - lift to keep traveling to the last touch point.
 - A cyan destination ring and faint path line stay visible until the core arrives.
-- The player now focuses on capturing the enemy main base, controlling mini-bases, healing, and using shockwave at high-risk moments.
+- The player focuses on capturing the enemy main base, controlling mini-bases, healing, and using shockwave at high-risk moments.
 - Core movement speed is reduced by 50%, making positioning heavier and more intentional.
-- Direct core healing/infection is much stronger, so dots flip quickly when a core reaches them.
+- Old infected/cleansed dot territory is no longer the main gameplay loop or HUD framing.
 - The old dot magnify/lens effect around cores has been removed; dots no longer repel, swirl, or balloon around the orb.
 - Fog of war has been removed. The arena is fully visible so performance work can shift toward gameplay and mechanics.
 - Player and enemy cores collide elastically, push apart, slow briefly, create contested gray shock zones, and now deal clash damage through shield and health.
+- Core clash damage now runs directly from the active combat update path, so player and enemy cores can damage each other whenever combat rings overlap.
 - Core death is a setback, not an instant match end:
   - defeated enemy cores respawn at their bases after a short delay,
-  - the player respawns at the player base with a territory penalty and temporary invulnerability.
+  - the player respawns at the player base with temporary invulnerability.
 - Blue and red bases pulse softly, restore nearby friendly shields, and act as respawn anchors.
-- Each side has a main base. Capturing the enemy main base wins the match; losing the player main base loses the match.
-- Mini-bases are placed strategically across the arena and can be captured, recaptured, and used as healing stations.
+- Each side has one main base. Capturing the enemy main base wins the match; losing the player main base loses the match.
+- In multi-enemy levels, every enemy core spawns and respawns from the same enemy main base in the opposite corner.
+- Bases have visible capture zones and capture progress rings.
+- If one team core is inside a capture zone, capture moves toward that team.
+- If both teams are inside, capture is contested and progress slows/bleeds instead of freely completing.
+- If no opposing core is inside, capture progress stabilizes back toward the current owner.
+- Mini-bases are placed strategically across the arena and can be captured, recaptured, and used as healing stations only when supplied.
+- Each map now uses six mini-bases: three chained outward from the player main base and three chained outward from the enemy main base.
+- Mini-base spacing is constrained so captured bases can connect on both desktop and mobile instead of spawning uselessly out of supply range.
+- Supplied mini-bases must connect back to a friendly main base through nearby friendly mini-bases.
+- Isolated mini-bases are dimmer, flicker subtly, and do not provide the fast mini-base recovery bonus.
+- Capturing a mini-base awards XP.
 - Friendly main bases restore 20 health per second after recovery delay.
 - Friendly mini-bases restore 6 health per second after recovery delay.
-- Pause stops timer, movement, infection, cleansing, nodes, pulses, particles, and dot animation.
+- Level-ups can trigger compact upgrade choices: Clash Power, Shield Cell, Drive, or Field Lens.
+- If the player ignores upgrades and levels multiple times, each level-up is queued as a pending upgrade pick.
+- Contextual hints explain key conditions such as capturing mini-bases, isolated bases, base threats, recovery supply, upgrades, and the enemy main-base goal.
+- Pause stops timer, movement, base capture, enemy decisions, nodes, pulses, particles, and core animation.
 - Reset restarts the current level.
 
 ### Dark Glass Interface
 
-- The UI now uses a compact dark glass navbar at the top of the screen.
-- The top bar contains the logo, infected count, cleansed count, timer, infection level, wave, shield, level controls, AI difficulty, reset, and pause.
+- The UI now uses an 80px dark glass navbar at the top of the screen.
+- The top bar contains the logo, Home, Levels, core level, supplied mini-base count, timer, enemy-base capture progress, wave, shield, recovery state, AI difficulty, reset, and pause.
 - The top bar is non-playable space; the arena begins below it.
 - The arena now runs full-width and continues to the bottom edge of the viewport.
 - Previous bottom HUD controls, bottom ability dock, bottom reset, and bottom mobile stat circles are disabled in favor of the single top command surface.
 - The Pixi background/frame has been shifted to a darker atmospheric shell to better match the new UI direction.
 - Influence visuals are intentionally subtle, while combat rings are clearer and match actual combat range.
+- The player core displays a small `LV n` title under the orb so progression is readable directly in the arena.
 
 ### Core Combat And Progression
 
@@ -61,38 +86,38 @@ The architecture is intentionally split:
 - Body radius controls orb size.
 - Collision radius controls physical pushback.
 - Combat radius controls visible ring-touch combat range.
-- Influence radius controls healing/infection territory range.
-- Vision radius controls fog reveal and stays larger than influence.
-- Healing/infection influence radius is now roughly 50% of the previous V1.08 field range.
+- Influence radius is retained for ability and proximity calculations, but the main visible objective is base capture.
+- Vision radius controls enemy visibility.
+- Influence radius is now roughly 50% of the previous V1.08 field range.
 - Influence radius scales by level with `baseInfluenceRadius * (1 + 0.05 * (level - 1))`.
 - Player and enemy cores also have level, XP, health, shield, mass, move speed, power, base position, respawn state, and invulnerability timers.
-- Player levels 1-5 by cleansing infected dots, capturing nodes, and destroying enemy cores.
+- Player and enemy cores now support levels 1-10.
+- The player levels by capturing mini-bases, dealing combat pressure, and destroying enemy cores.
 - Level-ups increase max health, shield capacity, influence radius, cleanse power, clash power, and visual core intensity.
 - Level 2 strengthens shockwave.
 - Level 3 unlocks the shield ability.
-- Level 4 shockwave leaves short-lived protected blue territory.
-- Level 5 provides a larger aura and stronger clash power with slightly slower movement.
+- Level 4 improves shockwave utility.
+- Higher core levels continue increasing health, shields, combat power, mass, and radius, with slight high-level speed tradeoffs.
 - Health and shield rings render around player and enemy cores in Pixi.
 - Floating high-contrast health/shield bars are now the primary combat readability layer:
   - health uses green, amber, and red thresholds,
   - shield uses pale violet/silver,
-  - dark translucent backplates keep bars readable over territory, fog, and haze.
-- Player bars are always visible. Enemy bars appear when enemies are visible, damaged, in combat, targeted, or near the player.
+  - dark translucent backplates keep bars readable over bases, effects, and the arena background.
+- Player bars are always visible. Enemy bars appear only when enemies are visible through player proximity or temporary reveal.
 - Invulnerable or shielded cores display subtle ring/shell feedback.
 - Combat begins when visible combat rings touch, so the visual ring matches the actual combat radius.
 - Clash sparks communicate advantage: cyan when the player is winning, orange/red when the enemy is winning, and purple/gray when the clash is even.
 - Core health and shield no longer regenerate during combat.
-- After combat ends, territory recovery waits 3 seconds; base recovery can start after 0.75 seconds.
+- After combat ends, normal recovery waits 3 seconds; base recovery can start after 0.75 seconds.
 - Recovery supply rules:
-  - enemy territory: no health or shield regeneration,
-  - neutral territory: slow shield-only recovery,
-  - own territory: modest health and shield regeneration,
-  - own base territory: fast health and shield regeneration.
+  - neutral arena: slow shield-only recovery,
+  - supplied mini-base: medium health and shield regeneration,
+  - own main base: fast health and shield regeneration.
 - Shield regeneration is prioritized before health regeneration.
 - Level-ups no longer fully heal the player; they restore a modest 20% max health and 50% max shield after max-stat increases.
 - The HUD shows compact recovery state feedback: `COMBAT`, `RECOVERING`, `REGEN`, `BASE REGEN`, or `NO SUPPLY`.
 - During `RECOVERING`, the HUD shows a countdown until normal recovery can begin.
-- When the player core actually restores health, small green healing numbers float above the health bar, such as `+2` in own territory or `+18` in base recovery.
+- When the player core actually restores health, small green healing numbers float above the health bar, such as `+6` at supplied mini-bases or `+20` in main-base recovery.
 
 ### Shield Ability
 
@@ -101,52 +126,74 @@ The architecture is intentionally split:
 - Shield cooldown: 12 seconds.
 - The shield adds temporary protection and a cyan shell/ring around the player core.
 
+### Support Bot Ability
+
+- Press `F` or use the bot UI button to deploy a small cyan support bot.
+- Up to three support bots can be active at once.
+- Support bots evaluate nearby mini-bases and enemies, then move independently to help capture or contest the arena.
+- Support bots capture mini-bases slowly, at roughly 25% of the main core capture speed.
+- Support bots cannot capture main bases; only large player/enemy cores can win or lose the match by taking a main base.
+- Support bots have light health, shield, collision, health bars, level labels, and trails, and can be destroyed in combat.
+
 ### Level Structure
 
 The prototype introduces mechanics gradually:
 
-- Level 1, First Cleanse: no enemy core, only seeded infected dots.
-- Level 2, Pinned Core: a static enemy core infects nearby territory.
-- Level 3, Slow Spreader: a slow enemy core moves outward and expands.
-- Level 4, Border Contest: the enemy begins contesting red/blue frontlines.
+- Level 1, First Cleanse: no enemy core; learn movement and base capture.
+- Level 2, Pinned Core: a static enemy core guards the enemy side.
+- Level 3, Slow Spreader: a slow enemy core starts expanding into mini-bases.
+- Level 4, Border Contest: the enemy begins contesting the base network.
 - Level 5, Pulse Pressure: enemy pulses and a light hunter escort enter play.
 - Level 6, Open War: nodes, walls, gates, energy wells, viscosity zones, and enemy variants combine.
 
-Use the level control to step through levels.
+Use the home screen level select to choose a level.
 
 ### Enemy Variants
 
-- Spreader: slow, broad infection field, high spread pressure.
+- Spreader: slow, broad pressure field, strong base-control pressure.
 - Hunter: faster, occasionally attacks the player, but spreads weakly.
 - Tank: large, slow, high mass, hard to push.
-- Splitter: breaks into smaller hunter-style infection cores when damaged.
-- Root: stationary; in advanced levels it creates branching infection pressure.
+- Splitter: breaks into smaller hunter-style enemy cores when damaged.
+- Root: stationary; in advanced levels it creates area pressure.
 
 Enemy AI still uses readable modes:
 
-- `expand`: grows into neutral territory.
-- `contest`: pressures red/blue frontlines and weak blue frontier dots.
-- `defend`: retreats toward its infected home when invaded.
+- `expand`: moves toward neutral or weakly defended mini-bases.
+- `contest`: pressures the base network and exposed supplied mini-bases.
+- `defend`: retreats toward enemy-owned bases when invaded.
 - `attack`: briefly pressures the player core, mostly from hunter-type enemies.
 - `recover` / `retreat`: pulls back toward base when health is low or the fight is unfavorable.
 
-Enemy targeting now uses scored candidates instead of direct chasing. Each enemy periodically evaluates neutral clusters, weak blue frontiers, nodes, bases, player territory, and the player core. Scores consider distance, territory value, node value, safety, player weakness, support, difficulty, and enemy variant role.
+Enemy targeting now uses scored candidates instead of direct chasing. Each enemy periodically evaluates neutral mini-bases, supplied player mini-bases, isolated player mini-bases, threatened enemy mini-bases, main-base threats, recovery routes, route interception points, the player main base, and the player core. Scores consider objective value, urgency, safety, distance, danger, player weakness, nearby support, difficulty, and enemy role.
+
+Enemy AI roles now shape utility weights:
+
+- Capturer: prioritizes neutral and isolated bases.
+- Defender: protects the main base and important outposts.
+- Hunter: attacks weak or overextended players when it has a favorable fight.
+- Interceptor: pressures likely routes and cuts supply lines.
+- Support: stays nearer allied objectives and reinforces contested areas.
+
+Enemy goals use short commitment timers, so bots hold a chosen objective for 1-2 seconds and only switch early when a substantially better goal appears. This prevents rapid jitter and reduces every enemy piling onto the same target.
 
 ### AI Difficulty
 
 Use the AI difficulty selector in the HUD:
 
-- Easy: slower decisions, more randomness, lower aggression, weaker infection/clash pressure, rare player hunts.
-- Medium: balanced frontier pressure, node capture, and sensible retreat behavior.
-- Hard: faster decisions, stronger target scoring, smarter node priority, earlier retreats, and opportunistic attacks when the player is weak or exposed.
-- Visible enemies show subtle intent cues: hunter attack lines, spreader infection aura pulses, tank blocking rings, retreat/recover lines back to base, and warning rings before enemy pulses fire.
+- Easy: slower decisions, more randomness, lower aggression, weaker base/clash pressure, rare player hunts.
+- Medium: balanced mini-base capture, defense, recovery, and sensible retreat behavior.
+- Hard: faster decisions, stronger base scoring, smarter supply-line pressure, earlier retreats, and opportunistic attacks when the player is weak or exposed.
+- Hard also reacts earlier to main-base threats, prioritizes supply-line cuts, and uses simple route prediction around player movement between mini-bases.
+- Visible enemies show subtle non-directional intent cues: hunter pressure rings, spreader pressure aura pulses, tank blocking rings, retreat/recover rings, and warning rings before enemy pulses fire.
+- Enemy cores are hidden unless inside player vision/combat range or temporarily revealed by shockwave.
+- Enemy destination/target lines are no longer drawn in the arena, so enemy intent does not leak through offscreen or hidden path lines.
 
 ### Fog Removal
 
 - The Pixi renderer no longer calls fog or haze drawing during the frame.
 - Fog and haze texture updates should remain `H0/F0` in diagnostics.
 - The gameplay map is fully visible.
-- Enemy awareness no longer depends on fog discovery.
+- Enemy visibility now depends on local player vision/combat range, not full-map fog textures.
 - Old fog arrays remain as harmless always-visible compatibility data until the next deeper simulation cleanup.
 
 ### Arena And Objectives
@@ -154,14 +201,17 @@ Use the AI difficulty selector in the HUD:
 - The arena is intentionally simplified for performance and readability.
 - Walls, gates, viscosity zones, and energy wells are disabled in this base-capture version.
 - Main bases are the win/loss objectives.
-- Mini-bases replace most of the old territory-control importance and act as healing stations.
+- Mini-bases replace most of the old territory-control importance and act as supplied healing stations.
+- Supplied mini-bases pulse gently and show connection lines back through the supply network.
+- Relay/mini-bases use a small chain/ring motif.
+- Isolated bases are visually dimmer and flicker to show that they need connection.
 
 ### Active Ability
 
 - Press `Space` or use the shockwave UI button to fire the player shockwave.
-- Shockwave emits a large, expanding cleansing pulse from the player core.
-- Using it drains 10% of current player territory and turns those dots neutral.
-- Standing in blue territory, owning nodes, and using energy wells improves recharge.
+- Shockwave emits a large, expanding utility pulse from the player core.
+- Enemy cores are revealed only after the expanding shockwave reaches them, then fade in and out for a few seconds.
+- Supplied bases and owned supplied mini-bases improve recharge.
 - Shockwave also pushes enemy cores away and briefly interrupts clash pressure.
 
 ### Strategic Nodes
@@ -169,8 +219,7 @@ Use the AI difficulty selector in the HUD:
 - Advanced levels spawn larger stationary node dots.
 - Hover a core over a node for 3 seconds to capture it.
 - Captured nodes pulse every 5 seconds.
-- Player nodes emit cleansing pulses.
-- Enemy nodes emit infection pulses.
+- Player and enemy nodes emit lightweight area pulses and visual pressure.
 
 ### Win, Loss, And Stars
 
@@ -181,7 +230,7 @@ Use the AI difficulty selector in the HUD:
   - under 2:00 = 3 stars,
   - under 3:30 = 2 stars,
   - under 5:00 = 1 star.
-- After 5:00, infection gradually becomes stronger, but the player can still win.
+- After 5:00, enemy pressure gradually becomes stronger, but the player can still win.
 
 ### PixiJS Renderer
 
@@ -214,7 +263,11 @@ Pixi containers are kept simple and ordered for future upgrades:
 - Canvas resolution is capped at `Math.min(devicePixelRatio || 1, 1.5)`.
 - Pixi uses responsive CSS sizing with capped internal renderer resolution.
 - Dot arrays still exist as lightweight simulation/fog samples, but Pixi no longer creates or renders dot sprites.
-- Territory haze is now generated from bases, mini-bases, and cores instead of thousands of per-dot radial gradients.
+- The Pixi background now uses generated static textures: a dark gradient arena shell, a subtle tiled dot grid, and a vignette generated only on resize.
+- There are no dynamic fog/haze texture rebuilds in the active frame path.
+- Base influence glows are low-count graphics around bases rather than full-screen haze from dots.
+- Moving cores leave a capped, fading glow trail. Trails are only sampled while cores move.
+- Base glows are generated from bases, mini-bases, and cores instead of thousands of per-dot radial gradients.
 - Per-dot frontline drawing is disabled.
 - Diagnostics still report dot sample counts, but `Visible Dots` and `Active Sprites` should remain near zero in this simplified renderer.
 - The arena is tracked with simple 192px render chunks for visibility, dirty, and fog diagnostics.
@@ -222,20 +275,14 @@ Pixi containers are kept simple and ordered for future upgrades:
 - Cores render through Pixi sprites and lightweight graphics for aura, destination, and collision feedback.
 - Ripples, pulses, shockwaves, particles, and collision bursts are rendered with pooled Pixi display objects.
 - Pulse and ripple rings use a reusable pre-rendered Pixi ring texture instead of redrawing ring graphics every frame.
-- Shockwave, enemy pulse, and node pulse gameplay now runs as active pulse objects that expand over time.
-- Active pulses query dots through a spatial grid and process only newly reached ring-band dots.
-- Pulse processing is frame-budgeted:
-  - `MAX_PULSE_DOT_HITS_PER_FRAME = 80`
-  - `MAX_PULSE_PARTICLES_PER_FRAME = 40`
-- Shockwave particle bursts use sampling instead of spawning one particle per affected dot.
+- Shockwave, enemy pulse, and node pulse visuals run as active pulse objects that expand over time.
+- Active pulses no longer process dot-territory hits in the main gameplay loop.
+- Shockwave particle bursts are capped and pooled.
 - Effect caps are:
   - `MAX_RIPPLES = 30`
   - `MAX_PARTICLES = 300`
   - `MAX_PULSES = 10`
-- Territory haze is rendered to a low-resolution canvas texture at 33% scale.
-- Haze normally refreshes every 4th frame, and temporarily refreshes every 2nd frame while pulses are active.
 - Heavy full-screen blur filters and per-dot gradient creation are avoided in the main render loop.
-- Haze skips fully unexplored dots and reports per-frame texture update counts for debugging.
 
 ### Debug Diagnostics
 
@@ -251,7 +298,7 @@ The overlay shows:
 - Pixi sync time,
 - pulse processing time,
 - last shockwave frame cost,
-- dots affected by the last shockwave,
+- legacy shockwave dot counters, expected to stay near zero after the base-capture cleanup,
 - particles spawned by the last shockwave,
 - active pulse queue length,
 - dot count,
@@ -259,21 +306,21 @@ The overlay shows:
 - hidden/unexplored dot count,
 - synced dot sprites this frame,
 - dirty dot count,
-- visible/dirty/fogged chunk counts,
+- visible/dirty/fogged chunk counts for legacy diagnostic compatibility,
 - render-state build time,
 - render-state allocation count,
 - dot sprite sync time,
 - health bar sync time,
-- fog/haze sync time,
-- haze and fog texture update counts,
-- fog visual toggle state,
+- fog/haze sync time, expected to stay near zero,
+- haze and fog texture update counts, expected to remain `H0/F0`,
+- fog visual state, now disabled,
 - ripple count,
 - particle count,
 - pulse count,
 - active effect count,
 - capped DPR,
-- haze scale and update cadence,
-- haze rebuild cost,
+- legacy haze scale/update cadence,
+- legacy haze rebuild cost, expected to stay near zero,
 - Pixi renderer type,
 - stage child count,
 - dot sprite count,
@@ -285,7 +332,7 @@ The overlay shows:
 - recovery state,
 - combat lockout remaining,
 - health and shield regeneration per second,
-- local territory supply,
+- local base supply,
 - base proximity,
 - shield cooldown/duration,
 - player respawn timer,
@@ -297,9 +344,9 @@ The overlay shows:
 ### Visual Direction
 
 - The game now uses a dark atmospheric shell with compact glass controls.
-- Blue/cyan and red/orange haze makes territory ownership readable.
-- Gray/purple frontline flicker highlights contested zones.
-- Larger nodes, darker viscosity zones, walls, gates, and energy wells add tactical landmarks.
+- Blue/cyan and red/orange base glows make base ownership readable.
+- Gray/purple clash bursts highlight contested core collisions.
+- Larger mini-bases and main-base rings are the primary tactical landmarks.
 - Core health rings, shield shells, base pulses, respawn rings, and death bursts make core combat readable without adding shaders.
 - The arena is fully visible, with readability coming from bases, cores, capture rings, and lightweight effects.
 - Mobile uses the same top command surface with horizontal overflow instead of separate bottom controls.
@@ -307,7 +354,7 @@ The overlay shows:
 ### Main Files
 
 - `src/app/page.tsx` mounts the game.
-- `src/components/GameCanvas.tsx` owns the React shell, HUD, level controls, debug overlay, pause/reset/shockwave controls, and keyboard shortcuts.
+- `src/components/GameCanvas.tsx` owns the React shell, home screen, level select, HUD, debug overlay, pause/reset/shockwave controls, and keyboard shortcuts.
 - `src/components/PixiGameCanvas.tsx` mounts Pixi, forwards pointer/touch input, runs the Pixi ticker, and throttles React stats updates.
 - `src/lib/game/Game.ts` owns game state, simulation, level generation, AI, arena modifiers, collisions, effects state, pause, win/loss, debug stats, and render snapshots.
 - `src/lib/game/Dot.ts` owns per-dot state and visual motion data.

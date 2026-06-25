@@ -16,6 +16,24 @@ export type CombatState = "idle" | "contact" | "clash" | "overpower" | "break";
 export type ParticleKind = AgentKind | "clashPlayer" | "clashEnemy" | "clashEven";
 export type RecoveryState = "combat" | "recoveryDelay" | "regenOwnTerritory" | "regenBase" | "noSupply";
 export type TerritorySupply = "own" | "enemy" | "neutral" | "base" | "miniBase";
+export type UpgradeChoiceId = "power" | "shield" | "speed" | "radius";
+export type BotRole = "capturer" | "defender" | "hunter" | "interceptor" | "support";
+export type AIGoalType =
+  | "captureNeutralBase"
+  | "capturePlayerOutpost"
+  | "defendMainBase"
+  | "defendOutpost"
+  | "recaptureLostBase"
+  | "cutSupplyLine"
+  | "attackPlayer"
+  | "interceptPlayer"
+  | "retreat"
+  | "recoverAtBase";
+export type UpgradeChoice = {
+  id: UpgradeChoiceId;
+  label: string;
+  description: string;
+};
 
 export const MAX_RIPPLES = 30;
 export const MAX_PARTICLES = 300;
@@ -46,6 +64,15 @@ const DIRECT_INFECT_SCALE = 12;
 const FOG_REVEAL_SCALE = 1.35;
 const COMBAT_LOCKOUT_SECONDS = 3;
 const BASE_REGEN_DELAY_SECONDS = 0.75;
+const SUPPLY_LINK_RADIUS = 330;
+const BASE_CAPTURE_SECONDS = 4.5;
+const NODE_CAPTURE_SECONDS = 3;
+const FRIENDLY_BOT_CAPTURE_MULTIPLIER = 0.25;
+const MAX_FRIENDLY_BOTS = 3;
+const BOT_SPAWN_COOLDOWN = 18;
+const HINT_COOLDOWN_SECONDS = 5.5;
+export const ENEMY_REVEAL_SECONDS = 3.2;
+const MAX_CORE_LEVEL = 10;
 export const CHUNK_SIZE = 192;
 
 export type Agent = {
@@ -110,8 +137,16 @@ export type Agent = {
   lastDecisionInterval: number;
   modeTimer: number;
   mode: EnemyMode;
+  role: BotRole;
+  goalType: AIGoalType | "none";
+  goalCommitmentTimer: number;
+  targetNodeId: number | null;
   selectedTarget: string;
   targetScore: number;
+  revealTimer: number;
+  isMinion: boolean;
+  canCaptureMain: boolean;
+  captureRate: number;
   canMove: boolean;
   canPulse: boolean;
   splitDone: boolean;
@@ -183,6 +218,8 @@ export type ControlNode = {
   y: number;
   radius: number;
   owner: NodeOwner;
+  supplied: boolean;
+  supplyParentId: number | null;
   captureBy: AgentKind | null;
   captureProgress: number;
   pulseTimer: number;
@@ -323,14 +360,9 @@ const DIFFICULTY_SETTINGS: Record<AIDifficulty, DifficultySettings> = {
 
 export type GameStats = {
   totalDots: number;
-  infectedCount: number;
-  cleansedCount: number;
-  neutralCount: number;
   elapsedSeconds: number;
   remainingSeconds: number;
   overtimeSeconds: number;
-  infectionLevel: number;
-  playerCoverage: number;
   playerBaseCapture: number;
   enemyBaseCapture: number;
   fogVisualsEnabled: boolean;
@@ -341,6 +373,9 @@ export type GameStats = {
   shieldCooldownRemaining: number;
   shieldActive: boolean;
   shieldTimer: number;
+  botReady: boolean;
+  botCooldownRemaining: number;
+  friendlyBotCount: number;
   playerLevel: number;
   playerXp: number;
   playerNextLevelXp: number;
@@ -356,6 +391,12 @@ export type GameStats = {
   playerLocalTerritory: TerritorySupply;
   nodePlayerCount: number;
   nodeEnemyCount: number;
+  nodePlayerSuppliedCount: number;
+  nodeEnemySuppliedCount: number;
+  hint: string | null;
+  upgradePending: boolean;
+  pendingUpgradeCount: number;
+  upgradeChoices: UpgradeChoice[];
   enemyMode: EnemyMode;
   enemyCount: number;
   enemyTypes: string;
@@ -414,6 +455,7 @@ export type GameDebugStats = {
   enemyHealthSummary: string;
   aiDifficulty: AIDifficulty;
   aiTargets: string;
+  baseSupplySummary: string;
   enemyDeaths: number;
   playerDeaths: number;
   visibleDotCount: number;
@@ -475,6 +517,7 @@ export type GameRenderState = {
   playerVisibility: Float32Array;
   enemyFog: Float32Array;
   player: Agent;
+  friendlyBots: Agent[];
   enemies: Agent[];
   nodes: ControlNode[];
   viscosityZones: ViscosityZone[];
@@ -488,6 +531,7 @@ export type GameRenderState = {
   destination: { active: boolean; x: number; y: number; pulse: number };
   preview: { active: boolean; x: number; y: number };
   shieldTimer: number;
+  enemyRevealTimer: number;
   debugVisible: boolean;
   status: GameStatus;
   paused: boolean;
@@ -556,7 +600,7 @@ const LEVELS: LevelConfig[] = [
   {
     number: 1,
     name: "First Cleanse",
-    summary: "No enemy core. Cleanse the seeded infection field.",
+    summary: "No enemy core. Learn movement, capture zones, and base control.",
     infectionSources: 5,
     enemyTypes: [],
     enemyCanMove: false,
@@ -574,7 +618,7 @@ const LEVELS: LevelConfig[] = [
   {
     number: 2,
     name: "Pinned Core",
-    summary: "A static enemy core infects nearby territory.",
+    summary: "A static enemy core guards the far base while you learn safe captures.",
     infectionSources: 3,
     enemyTypes: ["root"],
     enemyCanMove: false,
@@ -592,7 +636,7 @@ const LEVELS: LevelConfig[] = [
   {
     number: 3,
     name: "Slow Spreader",
-    summary: "A slow core moves outward and grows infection.",
+    summary: "A slow core starts taking mini-bases and pressuring supply.",
     infectionSources: 2,
     enemyTypes: ["spreader"],
     enemyCanMove: true,
@@ -610,7 +654,7 @@ const LEVELS: LevelConfig[] = [
   {
     number: 4,
     name: "Border Contest",
-    summary: "The enemy learns to pressure red/blue frontlines.",
+    summary: "The enemy begins contesting the mini-base network.",
     infectionSources: 2,
     enemyTypes: ["spreader"],
     enemyCanMove: true,
@@ -628,7 +672,7 @@ const LEVELS: LevelConfig[] = [
   {
     number: 5,
     name: "Pulse Pressure",
-    summary: "The enemy gains infection pulses and a light hunter escort.",
+    summary: "Enemy pulses and a light hunter escort create timing pressure.",
     infectionSources: 1,
     enemyTypes: ["spreader", "hunter"],
     enemyCanMove: true,
@@ -726,8 +770,16 @@ function createPlayer(): Agent {
     lastDecisionInterval: 0,
     modeTimer: 0,
     mode: "expand",
+    role: "capturer",
+    goalType: "none",
+    goalCommitmentTimer: 0,
+    targetNodeId: null,
     selectedTarget: "field",
     targetScore: 0,
+    revealTimer: 0,
+    isMinion: false,
+    canCaptureMain: true,
+    captureRate: 1,
     canMove: true,
     canPulse: false,
     splitDone: false,
@@ -804,8 +856,16 @@ function createEnemy(type: EnemyType, id: number, config: LevelConfig): Agent {
     lastDecisionInterval: 0,
     modeTimer: 0,
     mode: "expand",
+    role: getEnemyRole(type),
+    goalType: "captureNeutralBase",
+    goalCommitmentTimer: 0,
+    targetNodeId: null,
     selectedTarget: "expand",
     targetScore: 0,
+    revealTimer: 0,
+    isMinion: false,
+    canCaptureMain: true,
+    captureRate: 1,
     canMove,
     canPulse: config.enemyCanPulse,
     splitDone: false,
@@ -814,6 +874,59 @@ function createEnemy(type: EnemyType, id: number, config: LevelConfig): Agent {
     respawnTimer: 0,
     invulnerableTimer: 1,
   };
+}
+
+function getEnemyRole(type: EnemyType): BotRole {
+  switch (type) {
+    case "hunter":
+      return "hunter";
+    case "tank":
+      return "defender";
+    case "splitter":
+      return "interceptor";
+    case "root":
+      return "support";
+    case "spreader":
+    default:
+      return "capturer";
+  }
+}
+
+function createFriendlyBot(id: number, player: Agent): Agent {
+  const bot = createPlayer();
+  bot.id = -100 - id;
+  bot.role = id % 3 === 0 ? "support" : id % 2 === 0 ? "interceptor" : "capturer";
+  bot.goalType = "captureNeutralBase";
+  bot.selectedTarget = "spawn";
+  bot.baseRadius = 8;
+  bot.baseCombatRadius = 17;
+  bot.baseInfluenceRadius = 22;
+  bot.baseVisionRadius = 74;
+  bot.bodyRadius = 8;
+  bot.collisionRadius = 10;
+  bot.combatRadius = 17;
+  bot.radius = 8;
+  bot.fieldRadius = 22;
+  bot.speed = Math.max(42, player.speed * 0.82);
+  bot.moveSpeed = bot.speed;
+  bot.mass = 0.46;
+  bot.power = 7;
+  bot.health = 34;
+  bot.maxHealth = 34;
+  bot.shield = 8;
+  bot.maxShield = 8;
+  bot.level = Math.max(1, Math.min(3, Math.floor(player.level / 3)));
+  bot.influenceRadius = 22;
+  bot.visionRadius = 74;
+  bot.recoveryState = "noSupply";
+  bot.revealTimer = 0;
+  bot.isMinion = true;
+  bot.canCaptureMain = false;
+  bot.captureRate = FRIENDLY_BOT_CAPTURE_MULTIPLIER;
+  bot.canMove = true;
+  bot.canPulse = false;
+  bot.invulnerableTimer = 0.5;
+  return bot;
 }
 
 function createField(): PointerField {
@@ -838,6 +951,8 @@ export class Game {
   private levelIndex = 0;
   private player = createPlayer();
   private enemies: Agent[] = [];
+  private friendlyBots: Agent[] = [];
+  private nextFriendlyBotId = 1;
   private playerField = createField();
   private enemyField = createField();
   private destination = {
@@ -898,8 +1013,21 @@ export class Game {
   private shockwaveCharge = 1;
   private shieldTimer = 0;
   private shieldCooldownRemaining = 0;
+  private botCooldownRemaining = 0;
+  private enemyRevealTimer = 0;
   private aiDifficulty: AIDifficulty = "medium";
   private fogVisualsEnabled = false;
+  private hintText: string | null = null;
+  private hintCooldown = 0;
+  private shownHints = new Set<string>();
+  private pendingUpgradeChoices: UpgradeChoice[] = [];
+  private pendingUpgradeCount = 0;
+  private playerUpgradeBonuses = {
+    power: 0,
+    shield: 0,
+    speed: 1,
+    radius: 1,
+  };
   private playerDeaths = 0;
   private enemyDeaths = 0;
   private renderRevision = 0;
@@ -944,6 +1072,7 @@ export class Game {
     enemyHealthSummary: "none",
     aiDifficulty: "medium",
     aiTargets: "none",
+    baseSupplySummary: "none",
     enemyDeaths: 0,
     playerDeaths: 0,
     recoveryState: "noSupply",
@@ -1000,6 +1129,10 @@ export class Game {
     this.shockwaveCharge = 1;
     this.shieldTimer = 0;
     this.shieldCooldownRemaining = 0;
+    this.botCooldownRemaining = 0;
+    this.enemyRevealTimer = 0;
+    this.friendlyBots = [];
+    this.nextFriendlyBotId = 1;
     this.playerDeaths = 0;
     this.enemyDeaths = 0;
     this.ripples = [];
@@ -1016,6 +1149,17 @@ export class Game {
     this.maxFrameMsLast5s = 0;
     this.destination.active = false;
     this.preview.active = false;
+    this.hintText = null;
+    this.hintCooldown = 0;
+    this.shownHints.clear();
+    this.pendingUpgradeChoices = [];
+    this.pendingUpgradeCount = 0;
+    this.playerUpgradeBonuses = {
+      power: 0,
+      shield: 0,
+      speed: 1,
+      radius: 1,
+    };
     this.buildLevel();
   }
 
@@ -1049,6 +1193,78 @@ export class Game {
     return true;
   }
 
+  spawnFriendlyBot() {
+    if (
+      this.paused ||
+      this.status !== "playing" ||
+      this.player.isRespawning ||
+      this.botCooldownRemaining > 0 ||
+      this.friendlyBots.filter((bot) => bot.active).length >= MAX_FRIENDLY_BOTS
+    ) {
+      return false;
+    }
+
+    const bot = createFriendlyBot(this.nextFriendlyBotId, this.player);
+    this.nextFriendlyBotId += 1;
+    const angle = this.time * 1.7 + this.nextFriendlyBotId * 2.1;
+    const spawnDistance = this.player.bodyRadius + bot.bodyRadius + 18;
+    const point = this.clampToArena(
+      this.player.x + Math.cos(angle) * spawnDistance,
+      this.player.y + Math.sin(angle) * spawnDistance,
+      bot.collisionRadius + 8,
+    );
+    bot.x = point.x;
+    bot.y = point.y;
+    bot.targetX = point.x;
+    bot.targetY = point.y;
+    bot.baseX = this.player.baseX;
+    bot.baseY = this.player.baseY;
+    bot.homeX = point.x;
+    bot.homeY = point.y;
+    this.friendlyBots.push(bot);
+    this.botCooldownRemaining = BOT_SPAWN_COOLDOWN;
+    this.addRipple(bot.x, bot.y, "player", 58);
+    this.spawnBurst(bot.x, bot.y, "player", 12, 0.8);
+    this.showHint("bot-spawned", "Support bot deployed. Bots capture mini-bases slowly.", false);
+    return true;
+  }
+
+  chooseUpgrade(choiceId: UpgradeChoiceId) {
+    if (this.pendingUpgradeCount <= 0 || this.pendingUpgradeChoices.length === 0) {
+      return false;
+    }
+
+    const choice = this.pendingUpgradeChoices.find((candidate) => candidate.id === choiceId);
+
+    if (!choice) {
+      return false;
+    }
+
+    const previousHealth = this.player.health;
+    const previousShield = this.player.shield;
+
+    if (choice.id === "power") {
+      this.playerUpgradeBonuses.power += 7;
+    } else if (choice.id === "shield") {
+      this.playerUpgradeBonuses.shield += 12;
+    } else if (choice.id === "speed") {
+      this.playerUpgradeBonuses.speed *= 1.08;
+    } else if (choice.id === "radius") {
+      this.playerUpgradeBonuses.radius *= 1.08;
+    }
+
+    this.pendingUpgradeCount = Math.max(0, this.pendingUpgradeCount - 1);
+    if (this.pendingUpgradeCount <= 0) {
+      this.pendingUpgradeChoices = [];
+    }
+    this.applyCoreLevelStats(this.player);
+    this.player.health = Math.max(this.player.health, previousHealth);
+    this.player.shield = Math.min(this.player.maxShield, Math.max(this.player.shield, previousShield + (choice.id === "shield" ? 12 : 0)));
+    this.showHint("upgrade-applied", `${choice.label} installed.`, false);
+    this.addRipple(this.player.x, this.player.y, "player", this.player.radius + 108);
+    return true;
+  }
+
   setLevel(level: number) {
     const nextLevelIndex = clamp(Math.round(level), 1, LEVELS.length) - 1;
 
@@ -1059,6 +1275,15 @@ export class Game {
 
     this.levelIndex = nextLevelIndex;
     this.reset();
+  }
+
+  getLevelSummaries() {
+    return LEVELS.map((level) => ({
+      number: level.number,
+      name: level.name,
+      summary: level.summary,
+      enemyTypes: level.enemyTypes,
+    }));
   }
 
   nextLevel() {
@@ -1111,6 +1336,14 @@ export class Game {
     this.paused = !this.paused;
   }
 
+  setPaused(paused: boolean) {
+    if (this.status !== "playing") {
+      return;
+    }
+
+    this.paused = paused;
+  }
+
   activateShockwave() {
     if (this.paused || this.status !== "playing" || this.player.isRespawning || this.shockwaveCharge < 1) {
       return false;
@@ -1118,6 +1351,7 @@ export class Game {
 
     this.sacrificePlayerTerritory();
     this.shockwaveCharge = 0;
+    this.enemyRevealTimer = ENEMY_REVEAL_SECONDS;
     this.lastShockwaveFrameCost = 0;
     this.lastShockwaveDotsAffected = 0;
     this.lastShockwaveParticlesSpawned = 0;
@@ -1152,17 +1386,13 @@ export class Game {
       this.updateGates(safeDt);
       this.updateAgents(safeDt);
       this.resolveCoreCollisions(safeDt);
+      this.damageEnemiesNearPlayer(safeDt);
       this.updateFields();
       this.updateNodes(safeDt);
       this.updateEnemyPulses(safeDt);
       this.updatePulses(safeDt);
-      this.cleanseWithPlayer(safeDt);
-      this.infectWithEnemies(safeDt);
-      this.spreadPlayer(safeDt);
-      this.spreadInfection(safeDt);
       this.rechargeShockwave(safeDt);
-      this.resolveStates();
-      this.updateFrontlines();
+      this.updateHints(safeDt);
       this.checkOutcome();
     }
 
@@ -1172,25 +1402,7 @@ export class Game {
 
     this.visualFrame += 1;
 
-    for (const dot of this.dots) {
-      const visible = this.playerVisibility[dot.id] ?? 0;
-      const explored = this.playerFog[dot.id] ?? 0;
-      const active =
-        visible > 0.035 ||
-        (this.frontline[dot.id] ?? 0) > 0.18 ||
-        dot.energy > 0.14 ||
-        dot.enemyEnergy > 0.14;
-
-      if (!active && explored <= 0.025) {
-        continue;
-      }
-
-      if (!active && this.visualFrame % 12 !== dot.id % 12) {
-        continue;
-      }
-
-      dot.updateVisual(safeDt, this.time, this.playerField, this.enemyField);
-    }
+    this.enemyRevealTimer = Math.max(0, this.enemyRevealTimer - safeDt);
   }
 
   recordFrameMetrics(
@@ -1251,6 +1463,7 @@ export class Game {
       enemyHealthSummary: this.getEnemyHealthSummary(),
       aiDifficulty: this.aiDifficulty,
       aiTargets: this.getAiTargetSummary(),
+      baseSupplySummary: this.getBaseSupplySummary(),
       enemyDeaths: this.enemyDeaths,
       playerDeaths: this.playerDeaths,
       visibleDotCount: pixiMetrics?.visibleDotCount ?? 0,
@@ -1304,6 +1517,16 @@ export class Game {
       .join(" | ");
   }
 
+  private getBaseSupplySummary() {
+    if (this.nodes.length === 0) {
+      return "none";
+    }
+
+    const playerOwned = this.nodes.filter((node) => node.owner === "player");
+    const enemyOwned = this.nodes.filter((node) => node.owner === "enemy");
+    return `P ${playerOwned.filter((node) => node.supplied).length}/${playerOwned.length} E ${enemyOwned.filter((node) => node.supplied).length}/${enemyOwned.length}`;
+  }
+
   private trackFrameWindow(frameMs: number) {
     this.frameMetricClock += frameMs / 1000;
     this.frameMetricWindow.push({ time: this.frameMetricClock, frameMs });
@@ -1332,6 +1555,7 @@ export class Game {
       playerVisibility: this.playerVisibility,
       enemyFog: this.enemyFog,
       player: this.player,
+      friendlyBots: this.friendlyBots.filter((bot) => bot.active),
       enemies: this.getActiveEnemies(),
       nodes: this.nodes,
       viscosityZones: this.viscosityZones,
@@ -1345,6 +1569,7 @@ export class Game {
       destination: this.destination,
       preview: this.preview,
       shieldTimer: this.shieldTimer,
+      enemyRevealTimer: this.enemyRevealTimer,
       debugVisible,
       status: this.status,
       paused: this.paused,
@@ -1356,25 +1581,7 @@ export class Game {
   }
 
   getStats(): GameStats {
-    let infectedCount = 0;
-    let cleansedCount = 0;
-    let infectionSum = 0;
-
-    for (const dot of this.dots) {
-      infectionSum += dot.infectionAmount;
-
-      if (dot.infectionAmount > 0.58) {
-        infectedCount += 1;
-      }
-
-      if (dot.playerAmount > 0.45 && dot.infectionAmount < 0.35) {
-        cleansedCount += 1;
-      }
-    }
-
     const totalDots = this.dots.length || 1;
-    const infectedRatio = infectedCount / totalDots;
-    const averageInfection = infectionSum / totalDots;
     const activeEnemies = this.getActiveEnemies();
     const primaryEnemy = activeEnemies[0];
     const config = this.levelConfig;
@@ -1385,14 +1592,9 @@ export class Game {
 
     return {
       totalDots,
-      infectedCount,
-      cleansedCount,
-      neutralCount: Math.max(0, totalDots - infectedCount - cleansedCount),
       elapsedSeconds: Math.floor(this.elapsedSeconds),
       remainingSeconds: Math.max(0, Math.ceil(this.durationSeconds - this.elapsedSeconds)),
       overtimeSeconds: Math.max(0, Math.floor(this.elapsedSeconds - this.durationSeconds)),
-      infectionLevel: clamp(Math.max(infectedRatio, averageInfection) * 100, 0, 100),
-      playerCoverage: clamp((cleansedCount / totalDots) * 100, 0, 100),
       playerBaseCapture: clamp(playerBaseCapture * 100, 0, 100),
       enemyBaseCapture: clamp(enemyBaseCapture * 100, 0, 100),
       fogVisualsEnabled: this.fogVisualsEnabled,
@@ -1407,9 +1609,15 @@ export class Game {
       shieldCooldownRemaining: Math.max(0, this.shieldCooldownRemaining),
       shieldActive: this.shieldTimer > 0,
       shieldTimer: Math.max(0, this.shieldTimer),
+      botReady:
+        this.botCooldownRemaining <= 0 &&
+        !this.player.isRespawning &&
+        this.friendlyBots.filter((bot) => bot.active).length < MAX_FRIENDLY_BOTS,
+      botCooldownRemaining: Math.max(0, this.botCooldownRemaining),
+      friendlyBotCount: this.friendlyBots.filter((bot) => bot.active).length,
       playerLevel: this.player.level,
       playerXp: Math.floor(this.player.xp),
-      playerNextLevelXp: this.player.level >= 5 ? this.getPlayerXpCap() : this.getNextLevelXp(this.player.level),
+      playerNextLevelXp: this.player.level >= MAX_CORE_LEVEL ? this.getPlayerXpCap() : this.getNextLevelXp(this.player.level),
       playerHealth: Math.max(0, this.player.health),
       playerMaxHealth: this.player.maxHealth,
       playerShield: Math.max(0, this.player.shield),
@@ -1422,6 +1630,12 @@ export class Game {
       playerLocalTerritory: this.player.localTerritory,
       nodePlayerCount: this.nodes.filter((node) => node.owner === "player").length,
       nodeEnemyCount: this.nodes.filter((node) => node.owner === "enemy").length,
+      nodePlayerSuppliedCount: this.nodes.filter((node) => node.owner === "player" && node.supplied).length,
+      nodeEnemySuppliedCount: this.nodes.filter((node) => node.owner === "enemy" && node.supplied).length,
+      hint: this.hintText,
+      upgradePending: this.pendingUpgradeChoices.length > 0,
+      pendingUpgradeCount: this.pendingUpgradeCount,
+      upgradeChoices: this.pendingUpgradeChoices,
       enemyMode: primaryEnemy?.mode ?? "expand",
       enemyCount: activeEnemies.length,
       enemyTypes: activeEnemies.map((enemy) => enemy.type).join(", ") || "none",
@@ -1445,9 +1659,8 @@ export class Game {
   }
 
   private updateArena() {
-    const isMobile = this.width < 720;
     const sideInset = 0;
-    const topInset = isMobile ? 54 : 50;
+    const topInset = 80;
     const bottomInset = 0;
 
     this.arena = {
@@ -1564,13 +1777,7 @@ export class Game {
     const config = this.levelConfig;
     const margin = this.width < 720 ? 38 : 54;
     const playerPosition = this.clampToArena(this.arena.x + margin, this.arena.bottom - margin, margin);
-    const anchors = [
-      { x: this.arena.right - margin, y: this.arena.y + margin },
-      { x: this.arena.right - margin, y: this.arena.bottom - margin },
-      { x: this.arena.x + this.arena.width * 0.68, y: this.arena.y + margin },
-      { x: this.arena.right - margin, y: this.arena.y + this.arena.height * 0.54 },
-      { x: this.arena.x + this.arena.width * 0.56, y: this.arena.y + this.arena.height * 0.25 },
-    ];
+    const enemyBasePosition = this.clampToArena(this.arena.right - margin, this.arena.y + margin, margin);
 
     this.player = createPlayer();
     this.player.x = playerPosition.x;
@@ -1590,16 +1797,21 @@ export class Game {
 
     this.enemies = config.enemyTypes.map((type, index) => {
       const enemy = createEnemy(type, index + 1, config);
-      const anchor = anchors[index % anchors.length];
-      const position = this.clampToArena(anchor.x, anchor.y, enemy.collisionRadius + 10);
+      const spawnAngle = -Math.PI * 0.75 + index * 0.72;
+      const spawnDistance = this.width < 720 ? 32 : 48;
+      const position = this.clampToArena(
+        enemyBasePosition.x + Math.cos(spawnAngle) * spawnDistance,
+        enemyBasePosition.y + Math.sin(spawnAngle) * spawnDistance,
+        enemy.collisionRadius + 10,
+      );
       enemy.x = position.x;
       enemy.y = position.y;
       enemy.targetX = position.x;
       enemy.targetY = position.y;
       enemy.homeX = position.x;
       enemy.homeY = position.y;
-      enemy.baseX = position.x;
-      enemy.baseY = position.y;
+      enemy.baseX = enemyBasePosition.x;
+      enemy.baseY = enemyBasePosition.y;
       const enemyLegacyFieldRadius = clamp(ENEMY_SETTINGS[type].fieldRadius * (this.width < 720 ? 0.82 : 1), 56, 124);
       enemy.baseInfluenceRadius = enemyLegacyFieldRadius * 0.5;
       enemy.baseVisionRadius = Math.max(enemyLegacyFieldRadius * 1.26, enemy.baseInfluenceRadius + 64);
@@ -1612,30 +1824,17 @@ export class Game {
   }
 
   private createBases() {
-    const enemyBases =
-      this.enemies.length > 0
-        ? this.enemies.map((enemy) => ({
-            id: enemy.id,
-            team: "enemy" as const,
-            x: enemy.baseX,
-            y: enemy.baseY,
-            radius: enemy.radius + 34,
-            pulse: randomRange(0, Math.PI * 2),
-            captureBy: null,
-            captureProgress: 0,
-          }))
-        : [
-            {
-              id: -1,
-              team: "enemy" as const,
-              x: this.arena.right - 92,
-              y: this.arena.y + 92,
-              radius: this.player.radius + 38,
-              pulse: randomRange(0, Math.PI * 2),
-              captureBy: null,
-              captureProgress: 0,
-            },
-          ];
+    const enemyAnchor = this.enemies[0] ?? this.player;
+    const enemyBase = {
+      id: -1,
+      team: "enemy" as const,
+      x: this.enemies.length > 0 ? enemyAnchor.baseX : this.arena.right - 92,
+      y: this.enemies.length > 0 ? enemyAnchor.baseY : this.arena.y + 92,
+      radius: Math.max(this.player.radius + 38, ...this.enemies.map((enemy) => enemy.radius + 34)),
+      pulse: randomRange(0, Math.PI * 2),
+      captureBy: null,
+      captureProgress: 0,
+    };
 
     this.bases = [
       {
@@ -1648,45 +1847,46 @@ export class Game {
         captureBy: null,
         captureProgress: 0,
       },
-      ...enemyBases,
+      enemyBase,
     ];
+    this.updateBaseSupply();
   }
 
   private applyCoreLevelStats(agent: Agent, refill = false) {
-    const level = clamp(Math.round(agent.level), 1, 5);
+    const level = clamp(Math.round(agent.level), 1, MAX_CORE_LEVEL);
     const healthRatio = agent.maxHealth > 0 ? agent.health / agent.maxHealth : 1;
     const shieldRatio = agent.maxShield > 0 ? agent.shield / agent.maxShield : 1;
 
     if (agent.kind === "player") {
       const levelOffset = level - 1;
-      const speedScale = level >= 5 ? 0.9 : 1;
-      agent.bodyRadius = agent.baseRadius + levelOffset * 1.5;
+      const speedScale = level >= 8 ? 0.9 : level >= 5 ? 0.94 : 1;
+      agent.bodyRadius = agent.baseRadius + levelOffset * 1.15;
       agent.collisionRadius = agent.bodyRadius + 2;
       agent.combatRadius = agent.baseCombatRadius + levelOffset * 3;
       agent.radius = agent.bodyRadius;
       agent.influenceRadius = agent.baseInfluenceRadius * (1 + 0.05 * levelOffset);
       agent.visionRadius = agent.baseVisionRadius * (1 + 0.035 * levelOffset);
       agent.fieldRadius = agent.influenceRadius;
-      agent.maxHealth = 100 + levelOffset * 20;
-      agent.maxShield = 20 + levelOffset * 4;
-      agent.mass = 1.1 + levelOffset * 0.22;
-      agent.power = 20 + levelOffset * 4;
+      agent.maxHealth = 100 + levelOffset * 16;
+      agent.maxShield = 20 + levelOffset * 3.5;
+      agent.mass = 1.1 + levelOffset * 0.18;
+      agent.power = 20 + levelOffset * 3.5;
       agent.spreadPower = 1 + levelOffset * 0.08;
       agent.speed = agent.moveSpeed * speedScale;
     } else {
       const settings = ENEMY_SETTINGS[agent.type as EnemyType];
       const levelOffset = level - 1;
-      agent.bodyRadius = agent.baseRadius + levelOffset * 1.25;
+      agent.bodyRadius = agent.baseRadius + levelOffset * 1.05;
       agent.collisionRadius = agent.bodyRadius + (agent.type === "tank" ? 4 : 2);
       agent.combatRadius = agent.baseCombatRadius + levelOffset * 3;
       agent.radius = agent.bodyRadius;
       agent.influenceRadius = agent.baseInfluenceRadius * (1 + 0.05 * levelOffset);
       agent.visionRadius = agent.baseVisionRadius * (1 + 0.03 * levelOffset);
       agent.fieldRadius = agent.influenceRadius;
-      agent.maxHealth = 100 + levelOffset * 20;
-      agent.maxShield = settings.shield + levelOffset * 4;
+      agent.maxHealth = 100 + levelOffset * 16;
+      agent.maxShield = settings.shield + levelOffset * 3.5;
       agent.mass = settings.mass * (1 + levelOffset * 0.1);
-      agent.power = 20 + levelOffset * 4;
+      agent.power = 20 + levelOffset * 3.5;
       agent.spreadPower = settings.spreadPower * (1 + levelOffset * 0.06);
       agent.speed = agent.moveSpeed * (agent.type === "tank" ? 0.96 : 1);
     }
@@ -1698,14 +1898,50 @@ export class Game {
       agent.health = clamp(agent.maxHealth * healthRatio, 1, agent.maxHealth);
       agent.shield = clamp(agent.maxShield * shieldRatio, 0, agent.maxShield);
     }
+
+    if (agent.kind === "player") {
+      this.applyPlayerUpgradeBonuses();
+    }
+  }
+
+  private applyPlayerUpgradeBonuses() {
+    const player = this.player;
+    const healthRatio = player.maxHealth > 0 ? player.health / player.maxHealth : 1;
+    const shieldRatio = player.maxShield > 0 ? player.shield / player.maxShield : 1;
+
+    player.maxShield += this.playerUpgradeBonuses.shield;
+    player.shield = clamp(player.maxShield * shieldRatio, 0, player.maxShield);
+    player.speed *= this.playerUpgradeBonuses.speed;
+    player.moveSpeed = player.speed;
+    player.power += this.playerUpgradeBonuses.power;
+    player.combatRadius *= this.playerUpgradeBonuses.radius;
+    player.influenceRadius *= this.playerUpgradeBonuses.radius;
+    player.fieldRadius = player.influenceRadius;
+    player.health = clamp(player.maxHealth * healthRatio, 1, player.maxHealth);
+  }
+
+  private queueUpgradeChoice() {
+    this.pendingUpgradeCount += 1;
+
+    if (this.pendingUpgradeChoices.length === 0) {
+      this.pendingUpgradeChoices = [
+        { id: "power", label: "Clash Power", description: "+7 core combat power" },
+        { id: "shield", label: "Shield Cell", description: "+12 max shield" },
+        { id: "speed", label: "Drive", description: "+8% movement speed" },
+        { id: "radius", label: "Field Lens", description: "+8% combat and heal radius" },
+      ];
+    }
+    this.showHint("choose-upgrade", "Choose an upgrade.", false);
   }
 
   private getNextLevelXp(level: number) {
-    return [0, 80, 180, 340, 560, Number.POSITIVE_INFINITY][clamp(level, 1, 5)] ?? Number.POSITIVE_INFINITY;
+    return [0, 80, 180, 320, 500, 720, 980, 1280, 1620, 2000, Number.POSITIVE_INFINITY][
+      clamp(level, 1, MAX_CORE_LEVEL)
+    ] ?? Number.POSITIVE_INFINITY;
   }
 
   private getPlayerXpCap() {
-    return 560;
+    return 2000;
   }
 
   private grantPlayerXp(amount: number) {
@@ -1716,7 +1952,7 @@ export class Game {
     const xpCap = this.getPlayerXpCap();
     this.player.xp = clamp(this.player.xp + amount, 0, xpCap);
 
-    while (this.player.level < 5 && this.player.xp >= this.getNextLevelXp(this.player.level)) {
+    while (this.player.level < MAX_CORE_LEVEL && this.player.xp >= this.getNextLevelXp(this.player.level)) {
       this.player.level += 1;
       this.applyCoreLevelStats(this.player);
       this.player.health = clamp(this.player.health + this.player.maxHealth * 0.2, 1, this.player.maxHealth);
@@ -1724,15 +1960,16 @@ export class Game {
       this.addRipple(this.player.x, this.player.y, "player", this.player.radius + 132);
       this.spawnBurst(this.player.x, this.player.y, "player", 34, 1.55);
       this.createBases();
+      this.queueUpgradeChoice();
     }
 
-    if (this.player.level >= 5) {
+    if (this.player.level >= MAX_CORE_LEVEL) {
       this.player.xp = xpCap;
     }
   }
 
   private maybeLevelEnemy(enemy: Agent, xp: number) {
-    if (enemy.level >= 5) {
+    if (enemy.level >= MAX_CORE_LEVEL) {
       return;
     }
 
@@ -1755,39 +1992,49 @@ export class Game {
   }
 
   private createNodes() {
-    const count = this.levelConfig.number <= 1 ? 1 : this.levelConfig.number <= 3 ? 3 : 5;
     const radius = this.width < 720 ? 22 : 28;
-    const centerX = (this.arena.x + this.arena.right) / 2;
-    const centerY = (this.arena.y + this.arena.bottom) / 2;
-    const spanX = this.arena.width * 0.27;
-    const spanY = this.arena.height * 0.24;
-    const placements =
-      count <= 1
-        ? [{ x: centerX, y: centerY }]
-        : count <= 3
-          ? [
-              { x: centerX, y: centerY },
-              { x: centerX - spanX, y: centerY + spanY * 0.8 },
-              { x: centerX + spanX, y: centerY - spanY * 0.8 },
-            ]
-          : [
-              { x: centerX, y: centerY },
-              { x: centerX - spanX, y: centerY + spanY * 0.8 },
-              { x: centerX + spanX, y: centerY - spanY * 0.8 },
-              { x: centerX - spanX * 0.72, y: centerY - spanY },
-              { x: centerX + spanX * 0.72, y: centerY + spanY },
-            ];
+    const enemyBase = this.bases.find((base) => base.team === "enemy");
+    const playerBase = this.bases.find((base) => base.team === "player");
+    const center = {
+      x: (this.arena.x + this.arena.right) / 2,
+      y: (this.arena.y + this.arena.bottom) / 2,
+    };
+    const step = clamp(Math.min(this.arena.width, this.arena.height) * 0.24, 145, 235);
+    const makeChain = (base: { x: number; y: number }, sign: number) => {
+      const dx = center.x - base.x;
+      const dy = center.y - base.y;
+      const length = Math.max(1, Math.hypot(dx, dy));
+      const ux = dx / length;
+      const uy = dy / length;
+      const px = -uy;
+      const py = ux;
+
+      return [1, 2, 3].map((index) => {
+        const offset = (index === 2 ? -0.16 : 0.14) * step * sign;
+        return {
+          x: base.x + ux * step * index + px * offset,
+          y: base.y + uy * step * index + py * offset,
+        };
+      });
+    };
+    const placements = [
+      ...(playerBase ? makeChain(playerBase, 1) : [{ x: center.x - step, y: center.y }]),
+      ...(enemyBase ? makeChain(enemyBase, -1) : [{ x: center.x + step, y: center.y }]),
+    ];
 
     this.nodes = placements.map((placement, id) => ({
       id,
-      x: clamp(placement.x, this.arena.x + 86, this.arena.right - 86),
-      y: clamp(placement.y, this.arena.y + 82, this.arena.bottom - 82),
+      x: clamp(placement.x, this.arena.x + 76, this.arena.right - 76),
+      y: clamp(placement.y, this.arena.y + 76, this.arena.bottom - 76),
       radius,
       owner: "neutral",
+      supplied: false,
+      supplyParentId: null,
       captureBy: null,
       captureProgress: 0,
       pulseTimer: randomRange(2.2, 5),
     }));
+    this.updateBaseSupply();
   }
 
   private createViscosityZones(count: number) {
@@ -1965,6 +2212,7 @@ export class Game {
   private updateCoreTimers(dt: number) {
     this.shieldCooldownRemaining = Math.max(0, this.shieldCooldownRemaining - dt);
     this.shieldTimer = Math.max(0, this.shieldTimer - dt);
+    this.botCooldownRemaining = Math.max(0, this.botCooldownRemaining - dt);
     this.player.breakTimer = Math.max(0, this.player.breakTimer - dt);
     this.player.hitFlashTimer = Math.max(0, this.player.hitFlashTimer - dt);
     this.player.shieldFlashTimer = Math.max(0, this.player.shieldFlashTimer - dt);
@@ -1993,6 +2241,7 @@ export class Game {
     }
 
     for (const enemy of this.enemies) {
+      enemy.revealTimer = Math.max(0, enemy.revealTimer - dt);
       enemy.breakTimer = Math.max(0, enemy.breakTimer - dt);
       enemy.hitFlashTimer = Math.max(0, enemy.hitFlashTimer - dt);
       enemy.shieldFlashTimer = Math.max(0, enemy.shieldFlashTimer - dt);
@@ -2023,21 +2272,56 @@ export class Game {
         this.respawnCore(enemy);
       }
     }
+
+    for (const bot of this.friendlyBots) {
+      bot.breakTimer = Math.max(0, bot.breakTimer - dt);
+      bot.hitFlashTimer = Math.max(0, bot.hitFlashTimer - dt);
+      bot.shieldFlashTimer = Math.max(0, bot.shieldFlashTimer - dt);
+      bot.healthPulseTimer = Math.max(0, bot.healthPulseTimer - dt);
+      bot.effectTickTimer = Math.max(0, bot.effectTickTimer - dt);
+      bot.contactTimer = Math.max(0, bot.contactTimer - dt * 0.9);
+
+      if (bot.breakTimer > 0) {
+        bot.combatState = "break";
+      } else if (bot.contactTimer <= 0.02) {
+        bot.combatState = "idle";
+      }
+
+      if (bot.invulnerableTimer > 0) {
+        bot.invulnerableTimer = Math.max(0, bot.invulnerableTimer - dt);
+      }
+
+      this.updateCoreRecovery(bot, dt);
+    }
+
+    this.friendlyBots = this.friendlyBots.filter((bot) => bot.active || bot.isRespawning);
   }
 
   private updateBases(dt: number) {
     for (const base of this.bases) {
       base.pulse += dt;
-      const isPlayerBase = base.team === "player";
-      const enemyCapturingPlayerBase =
-        isPlayerBase &&
-        this.getActiveEnemies().some((enemy) => distance(enemy.x, enemy.y, base.x, base.y) < base.radius + enemy.collisionRadius + 16);
-      const playerCapturingEnemyBase =
-        !isPlayerBase && distance(this.player.x, this.player.y, base.x, base.y) < base.radius + this.player.collisionRadius + 16;
-      const capturer = enemyCapturingPlayerBase ? "enemy" : playerCapturingEnemyBase ? "player" : null;
+      const capturePadding = 28;
+      const playerInside =
+        !this.player.isRespawning &&
+        this.player.active &&
+        distance(this.player.x, this.player.y, base.x, base.y) < base.radius + this.player.collisionRadius + capturePadding;
+      const enemyInside = this.getActiveEnemies().some(
+        (enemy) => distance(enemy.x, enemy.y, base.x, base.y) < base.radius + enemy.collisionRadius + capturePadding,
+      );
+      const ownerInside = base.team === "player" ? playerInside : enemyInside;
+      const opponentInside = base.team === "player" ? enemyInside : playerInside;
+
+      if (ownerInside && opponentInside) {
+        if (base.captureBy) {
+          base.captureProgress = Math.max(0, base.captureProgress - dt * 0.05);
+        }
+        continue;
+      }
+
+      const capturer: AgentKind | null = opponentInside ? (base.team === "player" ? "enemy" : "player") : null;
 
       if (!capturer) {
-        base.captureProgress = Math.max(0, base.captureProgress - dt * 0.18);
+        base.captureProgress = Math.max(0, base.captureProgress - dt * (ownerInside ? 0.45 : 0.16));
         base.captureBy = null;
         continue;
       }
@@ -2047,7 +2331,7 @@ export class Game {
         base.captureProgress = 0;
       }
 
-      base.captureProgress = clamp(base.captureProgress + dt / 4.5, 0, 1);
+      base.captureProgress = clamp(base.captureProgress + dt / BASE_CAPTURE_SECONDS, 0, 1);
     }
   }
 
@@ -2144,29 +2428,72 @@ export class Game {
         continue;
       }
 
+      if (!node.supplied) {
+        continue;
+      }
+
       if (distance(agent.x, agent.y, node.x, node.y) <= node.radius + agent.bodyRadius + 58) {
         return "miniBase";
       }
     }
 
-    const nearest = this.findNearestDot(agent.x, agent.y);
-
-    if (!nearest) {
-      return "neutral";
-    }
-
-    const player = nearest.playerAmount;
-    const enemy = nearest.infectionAmount;
-
-    if (player > enemy + 0.12) {
-      return agent.kind === "player" ? "own" : "enemy";
-    }
-
-    if (enemy > player + 0.12) {
-      return agent.kind === "enemy" ? "own" : "enemy";
-    }
-
     return "neutral";
+  }
+
+  private showHint(key: string, text: string, once = true) {
+    if (once && this.shownHints.has(key)) {
+      return;
+    }
+
+    if (this.hintCooldown > 0 && this.hintText !== text) {
+      return;
+    }
+
+    if (once) {
+      this.shownHints.add(key);
+    }
+
+    this.hintText = text;
+    this.hintCooldown = HINT_COOLDOWN_SECONDS;
+  }
+
+  private updateHints(dt: number) {
+    this.hintCooldown = Math.max(0, this.hintCooldown - dt);
+
+    if (this.hintCooldown <= 0) {
+      this.hintText = null;
+    }
+
+    if (this.elapsedSeconds > 1.8) {
+      this.showHint("mini-base-intro", "Capture mini-bases to heal closer to enemy territory.");
+    }
+
+    if (this.elapsedSeconds > 7) {
+      this.showHint("enemy-main-goal", "Capture the enemy main base to win.");
+    }
+
+    if (this.nodes.some((node) => node.owner === "player" && !node.supplied)) {
+      this.showHint("isolated-base", "This base is isolated. Connect it to your main base.");
+    }
+
+    const playerBaseThreat = this.bases.some(
+      (base) => base.team === "player" && base.captureBy === "enemy" && base.captureProgress > 0.08,
+    );
+
+    if (playerBaseThreat) {
+      this.showHint("player-base-threat", "Enemy is contesting your base.", false);
+    }
+
+    if (
+      this.player.health < this.player.maxHealth * 0.55 &&
+      (this.player.recoveryState === "noSupply" || this.player.recoveryState === "recoveryDelay")
+    ) {
+      this.showHint("return-supply", "Return to a supplied base to recover.", false);
+    }
+
+    if (this.pendingUpgradeChoices.length > 0) {
+      this.showHint("choose-upgrade", "Choose an upgrade.", false);
+    }
   }
 
   private markCoreCombat(target: Agent, source?: Agent) {
@@ -2311,16 +2638,25 @@ export class Game {
   }
 
   private isPlayerVisibleToEnemy(_enemy: Agent) {
-    void _enemy;
     if (this.player.isRespawning || !this.player.active) {
       return false;
     }
 
-    return true;
+    if (distance(_enemy.x, _enemy.y, this.player.x, this.player.y) <= _enemy.visionRadius * 1.45 + this.player.bodyRadius) {
+      return true;
+    }
+
+    return this.bases.some(
+      (base) =>
+        base.team === "enemy" &&
+        (base.captureProgress > 0.03 ||
+          distance(this.player.x, this.player.y, base.x, base.y) < base.radius + this.player.combatRadius + 38),
+    );
   }
 
   private updateAgents(dt: number) {
     this.updateEnemyBrain(dt);
+    this.updateFriendlyBotBrain(dt);
     if (!this.player.isRespawning) {
       this.moveAgent(this.player, dt);
     } else {
@@ -2337,9 +2673,85 @@ export class Game {
       }
     }
 
+    for (const bot of this.friendlyBots) {
+      if (bot.active && bot.canMove) {
+        this.moveAgent(bot, dt);
+      }
+    }
+
     if (this.destination.active && distance(this.player.x, this.player.y, this.destination.x, this.destination.y) < 12) {
       this.destination.active = false;
     }
+  }
+
+  private updateFriendlyBotBrain(dt: number) {
+    for (const bot of this.friendlyBots) {
+      if (!bot.active || bot.isRespawning) {
+        continue;
+      }
+
+      bot.decisionTimer -= dt;
+      bot.goalCommitmentTimer = Math.max(0, bot.goalCommitmentTimer - dt);
+
+      if (bot.decisionTimer > 0 && bot.goalCommitmentTimer > 0) {
+        continue;
+      }
+
+      bot.decisionTimer = randomRange(0.8, 1.25);
+      bot.goalCommitmentTimer = randomRange(1.1, 1.7);
+      const target = this.chooseFriendlyBotTarget(bot);
+      bot.targetX = target.x;
+      bot.targetY = target.y;
+    }
+  }
+
+  private chooseFriendlyBotTarget(bot: Agent) {
+    const arenaDiagonal = Math.max(1, Math.hypot(this.arena.width, this.arena.height));
+    let best = {
+      x: this.player.x,
+      y: this.player.y,
+      label: "escort:player",
+      score: 0,
+    };
+
+    const addTarget = (x: number, y: number, label: string, value: number) => {
+      const target = this.findOpenPoint(x, y, bot.collisionRadius + 8);
+      const distCost = distance(bot.x, bot.y, target.x, target.y) / arenaDiagonal;
+      const score = value - distCost * 1.8 + randomRange(-0.05, 0.05);
+
+      if (score > best.score) {
+        best = { x: target.x, y: target.y, label, score };
+      }
+    };
+
+    for (const node of this.nodes) {
+      const value =
+        node.owner === "neutral"
+          ? 3.1
+          : node.owner === "enemy"
+            ? 2.55 + (node.supplied ? 0.5 : 0)
+            : node.supplied
+              ? 0.25
+              : 1.2;
+      addTarget(node.x, node.y, node.owner === "neutral" ? "capture:neutral-mini" : "capture:enemy-mini", value);
+    }
+
+    const nearbyEnemy = this.getActiveEnemies()
+      .filter((enemy) => distance(enemy.x, enemy.y, bot.x, bot.y) < bot.visionRadius + 160)
+      .sort((a, b) => distance(a.x, a.y, bot.x, bot.y) - distance(b.x, b.y, bot.x, bot.y))[0];
+
+    if (nearbyEnemy) {
+      addTarget(nearbyEnemy.x, nearbyEnemy.y, "attack:enemy-core", bot.role === "interceptor" ? 2.25 : 1.45);
+    }
+
+    if (bot.health < bot.maxHealth * 0.42) {
+      addTarget(bot.baseX, bot.baseY, "recover:base", 3.8);
+    }
+
+    bot.selectedTarget = best.label;
+    bot.targetScore = best.score;
+    bot.goalType = best.label.includes("recover") ? "recoverAtBase" : best.label.includes("enemy-core") ? "attackPlayer" : "captureNeutralBase";
+    return { x: best.x, y: best.y };
   }
 
   private moveAgent(agent: Agent, dt: number) {
@@ -2474,10 +2886,15 @@ export class Game {
   private chooseEnemyMode(enemy: Agent) {
     const allowed = this.levelConfig.enemyModes;
     const difficulty = this.getDifficultySettings();
-    const playerNearEnemyHome = this.sampleInfluence(enemy.homeX, enemy.homeY, enemy.influenceRadius * 1.25).player;
-    const currentEnemySample = this.sampleInfluence(enemy.x, enemy.y, enemy.influenceRadius);
     const healthRatio = enemy.health / Math.max(1, enemy.maxHealth);
     const playerKnown = this.isPlayerVisibleToEnemy(enemy);
+    const enemyMainThreat = this.bases.some(
+      (base) =>
+        base.team === "enemy" &&
+        (base.captureProgress > 0.08 ||
+          distance(this.player.x, this.player.y, base.x, base.y) < base.radius + this.player.combatRadius + 90),
+    );
+    const playerHasForwardBase = this.nodes.some((node) => node.owner === "player" && node.supplied);
     const playerWeak =
       playerKnown &&
       (this.player.health / Math.max(1, this.player.maxHealth) < 0.44 ||
@@ -2487,14 +2904,14 @@ export class Game {
       difficulty.aggression *
       (playerWeak ? 1.9 : 1);
     const shouldAttack = playerKnown && allowed.includes("attack") && Math.random() < attackChance && this.elapsedSeconds > 18;
-    const canContest = allowed.includes("contest") && this.findBestFrontlineDot(enemy);
+    const canContest = allowed.includes("contest") && (playerHasForwardBase || this.findBestFrontlineDot(enemy));
 
     if (healthRatio < difficulty.retreatHealth) {
       enemy.mode = healthRatio < 0.22 ? "retreat" : "recover";
       enemy.modeTimer = randomRange(1.4, 2.5);
-    } else if (allowed.includes("defend") && (playerNearEnemyHome > 0.2 || currentEnemySample.player > 0.55)) {
+    } else if (allowed.includes("defend") && enemyMainThreat) {
       enemy.mode = "defend";
-      enemy.modeTimer = randomRange(2.4, 4.2);
+      enemy.modeTimer = randomRange(1.2, 2.6);
     } else if (shouldAttack) {
       enemy.mode = "attack";
       enemy.modeTimer = randomRange(1.2, enemy.type === "hunter" ? 2.4 : 1.8);
@@ -2515,129 +2932,275 @@ export class Game {
     const healthRatio = enemy.health / Math.max(1, enemy.maxHealth);
     const playerHealthRatio = this.player.health / Math.max(1, this.player.maxHealth);
     const playerKnown = this.isPlayerVisibleToEnemy(enemy);
-    const playerTerritory = playerKnown ? this.sampleInfluence(this.player.x, this.player.y, this.player.influenceRadius).player : 0.5;
-    const playerWeaknessValue = (1 - playerHealthRatio) * 2 + (playerTerritory < 0.22 ? 0.8 : 0);
-    const candidates: Array<{ x: number; y: number; label: string; score: number }> = [];
+    const playerBase = this.bases.find((base) => base.team === "player");
+    const enemyBase = this.bases.find((base) => base.team === "enemy");
+    const playerWeaknessValue =
+      playerKnown && !this.player.isRespawning
+        ? (1 - playerHealthRatio) * 2.4 +
+          (this.player.localTerritory !== "base" && this.player.localTerritory !== "miniBase" ? 0.55 : 0)
+        : 0;
+    const occupiedTargets = new Map<string, number>();
 
-    const addCandidate = (x: number, y: number, label: string, value: number) => {
-      const target = this.findOpenPoint(x, y, enemy.collisionRadius + 10);
-      const targetSample = this.sampleInfluence(target.x, target.y, enemy.influenceRadius * 0.9);
-      const targetDistance = distance(enemy.x, enemy.y, target.x, target.y);
-      const distanceCost = targetDistance / Math.max(1, arenaDiagonal) * 2.1;
-      const safetyValue = targetSample.infection * 0.95 - targetSample.player * (enemy.type === "tank" ? 0.35 : 0.9);
-      const supportValue = this.countNearbyEnemies(target.x, target.y, enemy.visionRadius * 0.9, enemy.id) * 0.28;
-      candidates.push({
-        x: target.x,
-        y: target.y,
-        label,
-        score: value + safetyValue + supportValue - distanceCost + randomRange(-difficulty.randomness, difficulty.randomness),
-      });
-    };
-
-    addCandidate(enemy.baseX, enemy.baseY, healthRatio < 0.22 ? "retreat:base" : "recover:base", healthRatio < difficulty.retreatHealth ? 4.4 : 0.7);
-
-    for (const node of this.nodes) {
-      if (node.owner === "enemy" && enemy.mode !== "defend" && healthRatio > 0.38) {
+    for (const other of this.getActiveEnemies()) {
+      if (other.id === enemy.id || other.goalCommitmentTimer <= 0) {
         continue;
       }
 
-      const nodeValue =
-        node.owner === "player"
-          ? 3.2
-          : node.owner === "neutral"
-            ? 2.1
-            : 1.5 + (enemy.mode === "defend" ? 1.5 : 0);
-      const roleBonus =
-        enemy.type === "hunter" && node.owner === "player"
-          ? 0.9
-          : enemy.type === "tank" && node.owner === "enemy"
-            ? 1.1
-            : enemy.type === "spreader" && node.owner === "neutral"
-              ? 0.75
+      occupiedTargets.set(other.selectedTarget, (occupiedTargets.get(other.selectedTarget) ?? 0) + 1);
+    }
+
+    const candidates: Array<{ x: number; y: number; label: string; goal: AIGoalType; score: number }> = [];
+
+    const addCandidate = (x: number, y: number, label: string, goal: AIGoalType, value: number) => {
+      const target = this.findOpenPoint(x, y, enemy.collisionRadius + 10);
+      const targetDistance = distance(enemy.x, enemy.y, target.x, target.y);
+      const distanceCost = (targetDistance / Math.max(1, arenaDiagonal)) * (this.aiDifficulty === "hard" ? 1.25 : 1.9);
+      const friendlyBaseSupport = this.nodes.some(
+        (node) => node.owner === "enemy" && node.supplied && distance(node.x, node.y, target.x, target.y) < SUPPLY_LINK_RADIUS * 0.65,
+      )
+        ? 0.45
+        : 0;
+      const playerDanger =
+        playerKnown && distance(this.player.x, this.player.y, target.x, target.y) < this.player.combatRadius + enemy.combatRadius + 80
+          ? 0.42 + (this.player.health / Math.max(1, this.player.maxHealth)) * 0.24
+          : 0;
+      const safetyValue = friendlyBaseSupport - playerDanger;
+      const supportValue = this.countNearbyEnemies(target.x, target.y, enemy.visionRadius * 0.9, enemy.id) * 0.28;
+      const duplicatePenalty = (occupiedTargets.get(label) ?? 0) * (goal === "defendMainBase" ? 0.18 : 0.72);
+      const difficultyBonus =
+        this.aiDifficulty === "hard" && (goal === "cutSupplyLine" || goal === "defendMainBase" || goal === "recaptureLostBase")
+          ? 0.46
+          : this.aiDifficulty === "easy"
+            ? randomRange(-0.35, 0.12)
+            : 0;
+      candidates.push({
+        x: target.x,
+        y: target.y,
+        goal,
+        label,
+        score:
+          value +
+          safetyValue +
+          supportValue +
+          difficultyBonus -
+          distanceCost -
+          duplicatePenalty +
+          randomRange(-difficulty.randomness, difficulty.randomness),
+      });
+    };
+
+    const threatenedEnemyBase =
+      enemyBase &&
+      (enemyBase.captureProgress > 0.02 ||
+        distance(this.player.x, this.player.y, enemyBase.x, enemyBase.y) < enemyBase.radius + this.player.combatRadius + 112)
+        ? enemyBase
+        : null;
+
+    addCandidate(
+      enemy.baseX,
+      enemy.baseY,
+      healthRatio < 0.22 ? "retreat:main-base" : "recover:main-base",
+      healthRatio < difficulty.retreatHealth ? "retreat" : "recoverAtBase",
+      healthRatio < difficulty.retreatHealth ? 5.8 : healthRatio < 0.7 ? 1.1 : 0.35,
+    );
+
+    if (threatenedEnemyBase) {
+      addCandidate(
+        threatenedEnemyBase.x,
+        threatenedEnemyBase.y,
+        "defend:main-base",
+        "defendMainBase",
+        6.8 +
+          threatenedEnemyBase.captureProgress * 8 +
+          (enemy.role === "defender" ? 1.4 : 0) +
+          (this.aiDifficulty === "easy" ? -1.2 : this.aiDifficulty === "hard" ? 1.2 : 0),
+      );
+    }
+
+    for (const node of this.nodes) {
+      const nodeThreatened =
+        node.owner === "enemy" &&
+        distance(this.player.x, this.player.y, node.x, node.y) < node.radius + this.player.combatRadius + 76;
+      const goal: AIGoalType =
+        node.owner === "neutral"
+          ? "captureNeutralBase"
+          : node.owner === "player"
+            ? node.supplied
+              ? "cutSupplyLine"
+              : "capturePlayerOutpost"
+            : nodeThreatened
+              ? "defendOutpost"
+              : !node.supplied
+                ? "recaptureLostBase"
+                : "defendOutpost";
+      const objectiveValue =
+        goal === "captureNeutralBase"
+          ? 2.65
+          : goal === "cutSupplyLine"
+            ? 3.85
+            : goal === "capturePlayerOutpost"
+              ? 3.15
+              : goal === "recaptureLostBase"
+                ? 3.35
+                : nodeThreatened
+                  ? 4.35
+                  : 0.9;
+      const urgency =
+        node.captureBy === "player"
+          ? node.captureProgress * 3.7
+          : node.owner === "player" && node.supplied
+            ? 0.7
+            : node.owner === "neutral"
+              ? 0.3
               : 0;
+      const roleBonus =
+        enemy.role === "capturer" && (goal === "captureNeutralBase" || goal === "capturePlayerOutpost")
+          ? 1.05
+          : enemy.role === "defender" && (goal === "defendOutpost" || goal === "recaptureLostBase")
+            ? 1.2
+            : enemy.role === "interceptor" && goal === "cutSupplyLine"
+              ? 1
+              : enemy.role === "support" && node.owner === "enemy"
+                ? 0.8
+                : 0;
 
       if (this.aiDifficulty === "easy" && node.owner === "neutral" && Math.random() > difficulty.nodeFocus) {
         continue;
       }
 
-      addCandidate(node.x, node.y, `${node.owner}:node`, nodeValue * difficulty.nodeFocus + roleBonus);
-    }
-
-    const frontier = this.findBestFrontlineDot(enemy);
-    if (frontier) {
-      const roleBonus = enemy.type === "tank" ? 1.1 : enemy.type === "spreader" ? 0.65 : 0.25;
-      addCandidate(frontier.baseX, frontier.baseY, "contest:frontier", 2.5 + roleBonus + (enemy.mode === "contest" ? 1.1 : 0));
-    }
-
-    const expand = this.findBestDot((dot) => {
-      const neutralValue = (1 - dot.infectionAmount) * (1 - dot.playerAmount);
-      const exposedBlue = dot.playerAmount * (1 - dot.infectionAmount);
-      const roleBonus =
-        enemy.type === "spreader"
-          ? neutralValue * 1.2
-          : enemy.type === "hunter"
-            ? exposedBlue * 1.1
-            : enemy.type === "splitter"
-              ? exposedBlue * 0.85
-              : 0;
-      return neutralValue * 1.8 + exposedBlue * 1.35 + roleBonus - distance(enemy.x, enemy.y, dot.baseX, dot.baseY) / 580;
-    });
-
-    if (expand) {
-      addCandidate(expand.baseX, expand.baseY, "expand:cluster", 2.2 + (enemy.mode === "expand" ? 0.8 : 0));
+      const label =
+        node.owner === "neutral"
+          ? "capture:neutral-mini"
+          : node.owner === "player"
+            ? node.supplied
+              ? "cut-supply:player-mini"
+              : "attack:isolated-mini"
+            : nodeThreatened
+              ? "defend:mini-base"
+              : !node.supplied
+                ? "reconnect:mini-base"
+              : "hold:mini-base";
+      addCandidate(node.x, node.y, label, goal, (objectiveValue + urgency) * difficulty.nodeFocus + roleBonus);
     }
 
     if (playerKnown && this.levelConfig.number >= 3 && this.elapsedSeconds > 18 && !this.player.isRespawning) {
       const favorableFight =
         healthRatio > playerHealthRatio + 0.08 ||
-        this.sampleInfluence(enemy.x, enemy.y, enemy.influenceRadius).infection > 0.38 ||
-        enemy.type === "hunter";
-      const huntAllowed = Math.random() < difficulty.huntChance || enemy.mode === "attack";
+        enemy.localTerritory === "base" ||
+        enemy.localTerritory === "miniBase" ||
+        enemy.role === "hunter";
+      const huntAllowed = Math.random() < difficulty.huntChance || enemy.mode === "attack" || enemy.role === "hunter";
 
       if (favorableFight && huntAllowed) {
-        const roleBonus = enemy.type === "hunter" ? 1.4 : enemy.type === "splitter" ? 0.7 : -0.1;
+        const roleBonus = enemy.role === "hunter" ? 1.7 : enemy.role === "interceptor" ? 0.7 : -0.15;
         addCandidate(
           this.player.x,
           this.player.y,
           "attack:player",
+          "attackPlayer",
           1.6 + playerWeaknessValue * difficulty.aggression + roleBonus,
         );
       }
     }
 
-    if (this.levelConfig.number >= 6 && difficulty.aggression > 0.9 && this.getFogAt("enemy", this.player.baseX, this.player.baseY, 64) > 0.34) {
-      addCandidate(this.player.baseX, this.player.baseY, "pressure:player-base", 1.2 * difficulty.aggression);
+    if (playerBase && this.levelConfig.number >= 2) {
+      const playerOwnedMinis = this.nodes.filter((node) => node.owner === "player").length;
+      const basePressure =
+        1.1 * difficulty.aggression +
+        (this.aiDifficulty === "hard" ? playerOwnedMinis * 0.22 : 0) +
+        (enemy.role === "defender" ? -0.35 : enemy.role === "capturer" ? 0.45 : 0);
+      addCandidate(playerBase.x, playerBase.y, "attack:player-main-base", "capturePlayerOutpost", basePressure);
+    }
+
+    const predictedRoute = this.predictPlayerRouteTarget();
+    if (predictedRoute && (this.aiDifficulty === "hard" || (this.aiDifficulty === "medium" && predictedRoute.confidence > 0.72))) {
+      addCandidate(
+        predictedRoute.x,
+        predictedRoute.y,
+        `intercept:${predictedRoute.route}`,
+        "interceptPlayer",
+        (enemy.role === "interceptor" ? 2.35 : 1.25) * predictedRoute.confidence,
+      );
     }
 
     if (candidates.length === 0) {
       const fallback = this.findOpenPoint(enemy.baseX, enemy.baseY, enemy.collisionRadius + 10);
       enemy.selectedTarget = "fallback:base";
       enemy.targetScore = 0;
+      enemy.goalType = "recoverAtBase";
       return fallback;
     }
 
     candidates.sort((a, b) => b.score - a.score);
-    const selected =
+    let selected =
       Math.random() < difficulty.badChoiceChance
         ? candidates[Math.min(candidates.length - 1, randomInt(0, Math.min(2, candidates.length - 1)))]
         : candidates[0];
 
+    if (enemy.goalCommitmentTimer > 0 && enemy.selectedTarget) {
+      const committed = candidates.find((candidate) => candidate.label === enemy.selectedTarget);
+      const switchThreshold = this.aiDifficulty === "hard" ? 1.25 : this.aiDifficulty === "medium" ? 1.55 : 2.3;
+
+      if (committed && selected.score < committed.score + switchThreshold) {
+        selected = committed;
+      }
+    }
+
     enemy.selectedTarget = selected.label;
     enemy.targetScore = selected.score;
+    enemy.goalType = selected.goal;
+    enemy.goalCommitmentTimer = randomRange(
+      this.aiDifficulty === "hard" ? 1 : 1.35,
+      this.aiDifficulty === "easy" ? 2.4 : 1.9,
+    );
 
     if (selected.label.includes("player")) {
       enemy.mode = "attack";
-    } else if (selected.label.includes("frontier")) {
+    } else if (selected.label.includes("defend") || selected.label.includes("hold")) {
+      enemy.mode = "defend";
+    } else if (selected.label.includes("cut-supply") || selected.label.includes("isolated")) {
       enemy.mode = "contest";
     } else if (selected.label.includes("base") && healthRatio < difficulty.retreatHealth) {
       enemy.mode = "retreat";
-    } else if (selected.label.includes("node") && selected.label.startsWith("enemy")) {
-      enemy.mode = "defend";
-    } else if (selected.label.includes("node") || selected.label.includes("cluster")) {
+    } else if (selected.label.includes("mini") || selected.label.includes("capture")) {
       enemy.mode = "expand";
     }
 
     return { x: selected.x, y: selected.y };
+  }
+
+  private predictPlayerRouteTarget() {
+    if (this.player.isRespawning || !this.player.active || this.elapsedSeconds < 12) {
+      return null;
+    }
+
+    const route =
+      this.player.y < this.arena.y + this.arena.height * 0.34
+        ? "top"
+        : this.player.y > this.arena.y + this.arena.height * 0.66
+          ? "bottom"
+          : "center";
+    const forwardNodes = this.nodes
+      .filter((node) => node.owner !== "enemy")
+      .map((node) => ({
+        node,
+        score:
+          (node.owner === "neutral" ? 1.2 : 1.8) -
+          Math.abs(node.y - this.player.y) / Math.max(1, this.arena.height) -
+          distance(this.player.x, this.player.y, node.x, node.y) / Math.max(1, Math.hypot(this.arena.width, this.arena.height)),
+      }))
+      .sort((a, b) => b.score - a.score)[0];
+
+    if (!forwardNodes || forwardNodes.score < 0.15) {
+      return null;
+    }
+
+    return {
+      x: forwardNodes.node.x,
+      y: forwardNodes.node.y,
+      route,
+      confidence: clamp(0.42 + forwardNodes.score * 0.3 + (this.aiDifficulty === "hard" ? 0.18 : 0), 0, 0.92),
+    };
   }
 
   private chooseNodeTarget(enemy: Agent) {
@@ -2713,6 +3276,12 @@ export class Game {
       if (!this.player.isRespawning) {
         this.resolveAgentPairCollision(this.player, enemy, true, dt);
       }
+
+      for (const bot of this.friendlyBots) {
+        if (bot.active && !bot.isRespawning) {
+          this.resolveAgentPairCollision(bot, enemy, true, dt);
+        }
+      }
     }
 
     const enemies = this.getActiveEnemies();
@@ -2720,6 +3289,12 @@ export class Game {
     for (let i = 0; i < enemies.length; i += 1) {
       for (let j = i + 1; j < enemies.length; j += 1) {
         this.resolveAgentPairCollision(enemies[i], enemies[j], false, dt);
+      }
+    }
+
+    for (const bot of this.friendlyBots) {
+      if (bot.active && !bot.isRespawning && !this.player.isRespawning) {
+        this.resolveAgentPairCollision(this.player, bot, false, dt);
       }
     }
   }
@@ -2760,7 +3335,7 @@ export class Game {
     a.slowTimer = Math.max(a.slowTimer, isPlayerEnemy ? 0.55 : 0.28);
     b.slowTimer = Math.max(b.slowTimer, isPlayerEnemy ? 0.68 : 0.28);
 
-    if (isPlayerEnemy && this.collisionCooldown <= 0) {
+      if (isPlayerEnemy && this.collisionCooldown <= 0) {
       const x = (a.x + b.x) / 2;
       const y = (a.y + b.y) / 2;
       this.collisionCooldown = 0.55;
@@ -2938,39 +3513,67 @@ export class Game {
   }
 
   private updateNodes(dt: number) {
+    let supplyDirty = false;
+
     for (const node of this.nodes) {
-      const playerInside = distance(this.player.x, this.player.y, node.x, node.y) < node.radius + this.player.collisionRadius + 6;
-      const enemyInside = this.getActiveEnemies().some(
-        (enemy) => distance(enemy.x, enemy.y, node.x, node.y) < node.radius + enemy.collisionRadius + 6,
+      const capturePadding = 20;
+      const playerInside =
+        !this.player.isRespawning &&
+        this.player.active &&
+        distance(this.player.x, this.player.y, node.x, node.y) < node.radius + this.player.collisionRadius + capturePadding;
+      const friendlyBotsInside = this.friendlyBots.filter(
+        (bot) =>
+          bot.active &&
+          !bot.isRespawning &&
+          distance(bot.x, bot.y, node.x, node.y) < node.radius + bot.collisionRadius + capturePadding,
       );
-      const capturer = playerInside && !enemyInside ? "player" : enemyInside && !playerInside ? "enemy" : null;
+      const enemyInside = this.getActiveEnemies().some(
+        (enemy) => distance(enemy.x, enemy.y, node.x, node.y) < node.radius + enemy.collisionRadius + capturePadding,
+      );
+      const playerTeamInside = playerInside || friendlyBotsInside.length > 0;
+      const playerCaptureRate = playerInside
+        ? 1
+        : friendlyBotsInside.length > 0
+          ? Math.min(0.65, friendlyBotsInside.reduce((sum, bot) => sum + bot.captureRate, 0))
+          : 0;
 
-      if (!capturer || capturer === node.owner) {
-        node.captureProgress = Math.max(0, node.captureProgress - dt * 0.35);
-        node.captureBy = null;
-      } else {
-        if (node.captureBy !== capturer) {
-          node.captureBy = capturer;
-          node.captureProgress = 0;
+      if (playerTeamInside && enemyInside) {
+        if (node.captureBy) {
+          node.captureProgress = Math.max(0, node.captureProgress - dt * 0.06);
         }
+      } else {
+        const capturer = playerTeamInside ? "player" : enemyInside ? "enemy" : null;
+        const captureRate = capturer === "player" ? playerCaptureRate : capturer === "enemy" ? 1 : 0;
 
-        node.captureProgress += dt / 3;
-
-        if (node.captureProgress >= 1) {
-          node.owner = capturer;
-          node.captureProgress = 0;
+        if (!capturer || capturer === node.owner) {
+          node.captureProgress = Math.max(0, node.captureProgress - dt * (capturer === node.owner ? 0.48 : 0.26));
           node.captureBy = null;
-          node.pulseTimer = 0.35;
-          if (capturer === "player") {
-            this.grantPlayerXp(XP_NODE_CAPTURED);
-          } else {
-            for (const enemy of this.getActiveEnemies()) {
-              if (distance(enemy.x, enemy.y, node.x, node.y) < enemy.influenceRadius + node.radius + 20) {
-                this.maybeLevelEnemy(enemy, 28 * this.getDifficultySettings().enemyXpRate);
+        } else {
+          if (node.captureBy !== capturer) {
+            node.captureBy = capturer;
+            node.captureProgress = 0;
+          }
+
+          node.captureProgress += (dt * captureRate) / NODE_CAPTURE_SECONDS;
+
+          if (node.captureProgress >= 1) {
+            node.owner = capturer;
+            node.captureProgress = 0;
+            node.captureBy = null;
+            node.pulseTimer = 0.35;
+            supplyDirty = true;
+            if (capturer === "player") {
+              this.grantPlayerXp(XP_NODE_CAPTURED);
+              this.showHint("mini-base-captured", "Mini-base captured. Stay supplied to heal here.", false);
+            } else {
+              for (const enemy of this.getActiveEnemies()) {
+                if (distance(enemy.x, enemy.y, node.x, node.y) < enemy.influenceRadius + node.radius + 20) {
+                  this.maybeLevelEnemy(enemy, 28 * this.getDifficultySettings().enemyXpRate);
+                }
               }
             }
+            this.addRipple(node.x, node.y, "node", 96);
           }
-          this.addRipple(node.x, node.y, "node", 96);
         }
       }
 
@@ -2983,6 +3586,57 @@ export class Game {
       if (node.pulseTimer <= 0) {
         node.pulseTimer = 5;
         this.pulseNode(node);
+      }
+    }
+
+    if (supplyDirty) {
+      this.updateBaseSupply();
+    }
+  }
+
+  private updateBaseSupply() {
+    for (const node of this.nodes) {
+      node.supplied = false;
+      node.supplyParentId = null;
+    }
+
+    const teams: AgentKind[] = ["player", "enemy"];
+
+    for (const team of teams) {
+      const owned = this.nodes.filter((node) => node.owner === team);
+      const baseAnchors = this.bases.filter((base) => base.team === team);
+      let changed = true;
+
+      while (changed) {
+        changed = false;
+
+        for (const node of owned) {
+          if (node.supplied) {
+            continue;
+          }
+
+          const baseParent = baseAnchors.find((base) => distance(node.x, node.y, base.x, base.y) <= SUPPLY_LINK_RADIUS);
+
+          if (baseParent) {
+            node.supplied = true;
+            node.supplyParentId = baseParent.id;
+            changed = true;
+            continue;
+          }
+
+          const nodeParent = owned.find(
+            (candidate) =>
+              candidate.supplied &&
+              candidate.id !== node.id &&
+              distance(node.x, node.y, candidate.x, candidate.y) <= SUPPLY_LINK_RADIUS,
+          );
+
+          if (nodeParent) {
+            node.supplied = true;
+            node.supplyParentId = nodeParent.id;
+            changed = true;
+          }
+        }
       }
     }
   }
@@ -3036,46 +3690,10 @@ export class Game {
     });
     this.addRipple(enemy.x, enemy.y, "enemy", radius * 0.76);
 
-    if (enemy.type === "root" && this.levelConfig.number >= 6) {
-      this.growInfectionBranch(enemy);
-    }
-  }
-
-  private growInfectionBranch(enemy: Agent) {
-    const angle = Math.atan2(this.player.y - enemy.y, this.player.x - enemy.x) + randomRange(-0.45, 0.45);
-    const length = this.width < 720 ? 210 : 320;
-    const width = 0.34;
-
-    for (const dot of this.dots) {
-      const dx = dot.baseX - enemy.x;
-      const dy = dot.baseY - enemy.y;
-      const dotDistance = Math.hypot(dx, dy);
-
-      if (dotDistance <= enemy.bodyRadius || dotDistance > length) {
-        continue;
-      }
-
-      const dotAngle = Math.atan2(dy, dx);
-      const angleDelta = Math.abs(Math.atan2(Math.sin(dotAngle - angle), Math.cos(dotAngle - angle)));
-
-      if (angleDelta > width) {
-        continue;
-      }
-
-      const influence = smoothstep(length, 0, dotDistance) * smoothstep(width, 0, angleDelta);
-      dot.infectionAmount = clamp(dot.infectionAmount + influence * 0.22, 0, 1);
-      dot.playerAmount = clamp(dot.playerAmount - influence * 0.15, 0, 1);
-
-      if (influence > 0.45 && Math.random() < 0.08) {
-        this.addParticle(dot.x, dot.y, "enemy", 1.3);
-      }
-    }
   }
 
   private updatePulses(dt: number) {
     const started = typeof performance !== "undefined" ? performance.now() : 0;
-    let dotBudget = MAX_PULSE_DOT_HITS_PER_FRAME;
-    let particleBudget = MAX_PULSE_PARTICLES_PER_FRAME;
     let shockwaveProcessedThisFrame = false;
 
     for (let index = this.pulses.length - 1; index >= 0; index -= 1) {
@@ -3085,27 +3703,9 @@ export class Game {
       if (pulse.currentRadius < pulse.maxRadius) {
         pulse.previousRadius = pulse.currentRadius;
         pulse.currentRadius = Math.min(pulse.maxRadius, pulse.currentRadius + pulse.speed * dt);
-        this.queuePulseDotHits(pulse);
         this.applyPulseToEnemies(pulse);
       } else {
         pulse.previousRadius = pulse.currentRadius;
-      }
-
-      while (pulse.pendingDotHits.length > 0 && dotBudget > 0) {
-        const hit = pulse.pendingDotHits.shift();
-
-        if (!hit) {
-          break;
-        }
-
-        const spawnedParticle = this.applyPulseDotHit(pulse, hit, particleBudget > 0);
-        pulse.dotsAffected += 1;
-        dotBudget -= 1;
-
-        if (spawnedParticle) {
-          pulse.particlesSpawned += 1;
-          particleBudget -= 1;
-        }
       }
 
       if (pulse.kind === "shockwave") {
@@ -3125,65 +3725,6 @@ export class Game {
     if (shockwaveProcessedThisFrame) {
       this.lastShockwaveFrameCost = this.pulseProcessMs;
     }
-  }
-
-  private queuePulseDotHits(pulse: ActivePulse) {
-    const band = this.getPulseBand(pulse);
-    const innerRadius = Math.max(0, pulse.previousRadius - band);
-    const outerRadius = Math.min(pulse.maxRadius + band, pulse.currentRadius + band);
-    const candidates = this.queryDotsInRadius(pulse.x, pulse.y, outerRadius, innerRadius, this.pulseQueryBuffer);
-
-    for (const dotId of candidates) {
-      if (pulse.processedDotIds.has(dotId)) {
-        continue;
-      }
-
-      const dot = this.dots[dotId];
-      const waveDistance = dot.distanceTo(pulse.x, pulse.y);
-      const edge = 1 - clamp(Math.abs(waveDistance - pulse.currentRadius) / band, 0, 1);
-
-      if (edge <= 0.02) {
-        continue;
-      }
-
-      pulse.processedDotIds.add(dotId);
-      pulse.pendingDotHits.push({ id: dotId, edge });
-    }
-  }
-
-  private applyPulseDotHit(pulse: ActivePulse, hit: PulseDotHit, canSpawnParticle: boolean) {
-    const dot = this.dots[hit.id];
-    const power = hit.edge * pulse.strength;
-
-    if (pulse.owner === "player") {
-      dot.infectionAmount = clamp(dot.infectionAmount - power, 0, 1);
-      dot.playerAmount = clamp(dot.playerAmount + power * 0.92, 0, 1);
-
-      if (pulse.kind === "shockwave" && this.player.level >= 4) {
-        dot.playerAmount = clamp(dot.playerAmount + hit.edge * 0.08, 0, 1);
-      }
-    } else if (pulse.owner === "enemy") {
-      dot.infectionAmount = clamp(dot.infectionAmount + power, 0, 1);
-      dot.playerAmount = clamp(dot.playerAmount - power * 0.7, 0, 1);
-    }
-
-    if (!canSpawnParticle || pulse.owner === "neutral") {
-      return false;
-    }
-
-    const chance =
-      pulse.kind === "shockwave"
-        ? 0.1 + hit.edge * 0.12
-        : pulse.kind === "node"
-          ? 0.04 + hit.edge * 0.08
-          : 0.035 + hit.edge * 0.07;
-
-    if (Math.random() > chance) {
-      return false;
-    }
-
-    this.addParticle(dot.x, dot.y, pulse.owner, pulse.kind === "shockwave" ? 1.45 : 1.16);
-    return true;
   }
 
   private applyPulseToEnemies(pulse: ActivePulse) {
@@ -3211,6 +3752,7 @@ export class Game {
       }
 
       pulse.processedEnemyIds.add(enemy.id);
+      enemy.revealTimer = ENEMY_REVEAL_SECONDS;
       this.damageEnemy(enemy, edge * (pulse.kind === "shockwave" ? 0.42 : 0.18));
       enemy.slowTimer = Math.max(enemy.slowTimer, pulse.kind === "shockwave" ? 1.1 : 0.42);
 
@@ -3281,52 +3823,62 @@ export class Game {
 
   private damageEnemiesNearPlayer(dt: number) {
     for (const enemy of this.getActiveEnemies()) {
-      const playerDistance = distance(this.player.x, this.player.y, enemy.x, enemy.y);
-      const combatRange = this.player.combatRadius + enemy.combatRadius;
+      this.resolveCombatDamage(this.player, enemy, dt, 1);
+
+      for (const bot of this.friendlyBots) {
+        if (bot.active && !bot.isRespawning) {
+          this.resolveCombatDamage(bot, enemy, dt, 0.62);
+        }
+      }
+    }
+  }
+
+  private resolveCombatDamage(playerSide: Agent, enemy: Agent, dt: number, playerDamageScale: number) {
+      const playerDistance = distance(playerSide.x, playerSide.y, enemy.x, enemy.y);
+      const combatRange = playerSide.combatRadius + enemy.combatRadius;
 
       if (playerDistance > combatRange) {
-        continue;
+        return;
       }
 
       if (
-        this.player.invulnerableTimer > 0 ||
+        playerSide.invulnerableTimer > 0 ||
         enemy.invulnerableTimer > 0 ||
-        this.player.isRespawning ||
+        playerSide.isRespawning ||
         enemy.isRespawning
       ) {
-        continue;
+        return;
       }
 
-      const bodyRange = this.player.bodyRadius + enemy.bodyRadius;
+      const bodyRange = playerSide.bodyRadius + enemy.bodyRadius;
       const falloffDistance = Math.max(1, combatRange - bodyRange);
       const engagement =
         playerDistance <= bodyRange
           ? 1
           : clamp(1 - (playerDistance - bodyRange) / falloffDistance, 0.35, 1);
-      const playerDamage = this.getCombatDamagePerSecond(this.player, enemy) * engagement;
-      const enemyDamage = this.getCombatDamagePerSecond(enemy, this.player) * this.getDifficultySettings().clashPressure * engagement;
-      const contactTime = Math.min(Math.max(this.player.contactTimer, enemy.contactTimer) + dt, 1.6);
+      const playerDamage = this.getCombatDamagePerSecond(playerSide, enemy) * engagement * playerDamageScale;
+      const enemyDamage = this.getCombatDamagePerSecond(enemy, playerSide) * this.getDifficultySettings().clashPressure * engagement;
+      const contactTime = Math.min(Math.max(playerSide.contactTimer, enemy.contactTimer) + dt, 1.6);
       const sustained = contactTime >= 0.5;
       const playerOverpowering = playerDamage > enemyDamage * 1.35;
       const enemyOverpowering = enemyDamage > playerDamage * 1.35;
-      const midpointX = (this.player.x + enemy.x) / 2;
-      const midpointY = (this.player.y + enemy.y) / 2;
+      const midpointX = (playerSide.x + enemy.x) / 2;
+      const midpointY = (playerSide.y + enemy.y) / 2;
 
-      this.player.lastClashAt = this.time;
-      this.player.combatLockoutTimer = COMBAT_LOCKOUT_SECONDS;
+      playerSide.lastClashAt = this.time;
+      playerSide.combatLockoutTimer = COMBAT_LOCKOUT_SECONDS;
       enemy.lastClashAt = this.time;
       enemy.combatLockoutTimer = COMBAT_LOCKOUT_SECONDS;
-      this.updateCombatState(this.player, enemy, contactTime, playerOverpowering);
-      this.updateCombatState(enemy, this.player, contactTime, enemyOverpowering);
-      this.emitCombatEffects(this.player, enemy, midpointX, midpointY, sustained, playerDamage, enemyDamage);
+      this.updateCombatState(playerSide, enemy, contactTime, playerOverpowering);
+      this.updateCombatState(enemy, playerSide, contactTime, enemyOverpowering);
+      this.emitCombatEffects(playerSide, enemy, midpointX, midpointY, sustained, playerDamage, enemyDamage);
 
-      if (this.player.breakTimer > 0 || enemy.breakTimer > 0) {
-        continue;
+      if (playerSide.breakTimer > 0 || enemy.breakTimer > 0) {
+        return;
       }
 
-      this.applyCoreDamage(enemy, playerDamage * dt, this.player);
-      this.applyCoreDamage(this.player, enemyDamage * dt, enemy);
-    }
+      this.applyCoreDamage(enemy, playerDamage * dt, playerSide);
+      this.applyCoreDamage(playerSide, enemyDamage * dt, enemy);
   }
 
   private damageEnemy(enemy: Agent, amount: number) {
@@ -3367,11 +3919,28 @@ export class Game {
       return;
     }
 
-    if (target.kind === "player") {
+    if (target.isMinion) {
+      this.destroyFriendlyBot(target);
+    } else if (target.kind === "player") {
       this.destroyPlayerCore();
     } else {
       this.destroyEnemyCore(target, source?.kind === "player");
     }
+  }
+
+  private destroyFriendlyBot(bot: Agent) {
+    if (!bot.active) {
+      return;
+    }
+
+    bot.active = false;
+    bot.isRespawning = false;
+    bot.health = 0;
+    bot.shield = 0;
+    bot.velocityX = 0;
+    bot.velocityY = 0;
+    this.addRipple(bot.x, bot.y, "player", bot.radius + 42);
+    this.spawnBurst(bot.x, bot.y, "player", 12, 0.72);
   }
 
   private destroyEnemyCore(enemy: Agent, killedByPlayer = true) {
@@ -3425,8 +3994,15 @@ export class Game {
     core.isRespawning = false;
     core.respawnTimer = 0;
     core.invulnerableTimer = core.kind === "player" ? 2.4 : 1.8;
-    core.x = core.baseX;
-    core.y = core.baseY;
+    const respawnAngle = core.kind === "player" ? 0 : -Math.PI * 0.75 + core.id * 0.72;
+    const respawnDistance = core.kind === "player" ? 0 : this.width < 720 ? 28 : 42;
+    const respawnPoint = this.clampToArena(
+      core.baseX + Math.cos(respawnAngle) * respawnDistance,
+      core.baseY + Math.sin(respawnAngle) * respawnDistance,
+      core.collisionRadius + 10,
+    );
+    core.x = respawnPoint.x;
+    core.y = respawnPoint.y;
     core.targetX = core.baseX;
     core.targetY = core.baseY;
     core.health = core.kind === "player" ? core.maxHealth : core.maxHealth * 0.72;
@@ -3631,29 +4207,14 @@ export class Game {
       return;
     }
 
-    const sample = this.sampleInfluence(this.player.x, this.player.y, this.player.influenceRadius * 0.9);
-    const rechargeBonus = sample.player > 0.45 ? 1.25 : 1;
-    const nodeBonus = this.nodes.filter((node) => node.owner === "player").length * 0.08;
+    const supplyBonus = this.player.localTerritory === "base" ? 1.45 : this.player.localTerritory === "miniBase" ? 1.22 : 1;
+    const nodeBonus = this.nodes.filter((node) => node.owner === "player" && node.supplied).length * 0.08;
     const wellBonus = this.getEnergyWellBonus();
-    this.shockwaveCharge = clamp(this.shockwaveCharge + dt * 0.032 * (rechargeBonus + nodeBonus) * wellBonus, 0, 1);
+    this.shockwaveCharge = clamp(this.shockwaveCharge + dt * 0.032 * (supplyBonus + nodeBonus) * wellBonus, 0, 1);
   }
 
   private sacrificePlayerTerritory() {
-    const playerDots = this.dots
-      .filter((dot) => dot.playerAmount > 0.45 && dot.infectionAmount < 0.35)
-      .sort((a, b) => {
-        const frontierA = a.playerAmount - a.infectionAmount;
-        const frontierB = b.playerAmount - b.infectionAmount;
-        return frontierA - frontierB;
-      });
-    const count = Math.ceil(playerDots.length * 0.1);
-
-    for (let index = 0; index < count; index += 1) {
-      const dot = playerDots[index];
-      dot.playerAmount = 0;
-      dot.infectionAmount = 0;
-      dot.state = "neutral";
-    }
+    this.shockwaveCharge = Math.max(0, this.shockwaveCharge - 0.08);
   }
 
   private resolveStates() {

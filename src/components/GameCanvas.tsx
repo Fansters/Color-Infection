@@ -2,12 +2,12 @@
 
 import {
   Activity,
+  Bot,
   Bug,
   ChevronLeft,
-  ChevronRight,
-  CircleDot,
-  Crosshair,
   Flag,
+  Home,
+  Map,
   Pause,
   Pin,
   Play,
@@ -24,13 +24,8 @@ import { Game, type AIDifficulty, type GameDebugStats, type GameStats } from "@/
 
 const initialStats: GameStats = {
   totalDots: 0,
-  infectedCount: 0,
-  cleansedCount: 0,
-  neutralCount: 0,
   elapsedSeconds: 0,
   remainingSeconds: 300,
-  infectionLevel: 0,
-  playerCoverage: 0,
   playerBaseCapture: 0,
   enemyBaseCapture: 0,
   fogVisualsEnabled: false,
@@ -41,6 +36,9 @@ const initialStats: GameStats = {
   shieldCooldownRemaining: 0,
   shieldActive: false,
   shieldTimer: 0,
+  botReady: true,
+  botCooldownRemaining: 0,
+  friendlyBotCount: 0,
   playerLevel: 1,
   playerXp: 0,
   playerNextLevelXp: 80,
@@ -56,6 +54,12 @@ const initialStats: GameStats = {
   playerLocalTerritory: "neutral",
   nodePlayerCount: 0,
   nodeEnemyCount: 0,
+  nodePlayerSuppliedCount: 0,
+  nodeEnemySuppliedCount: 0,
+  hint: null,
+  upgradePending: false,
+  pendingUpgradeCount: 0,
+  upgradeChoices: [],
   enemyMode: "expand",
   enemyCount: 0,
   enemyTypes: "none",
@@ -63,14 +67,15 @@ const initialStats: GameStats = {
   level: 1,
   maxLevel: 6,
   levelName: "First Cleanse",
-  levelSummary: "No enemy core. Cleanse the seeded infection field.",
+  levelSummary: "No enemy core. Learn movement, capture zones, and base control.",
   overtimeSeconds: 0,
   stars: 0,
   paused: false,
   status: "playing",
 };
 
-type Tone = "infected" | "clean" | "neutral";
+type Tone = "clean" | "neutral";
+type GameScreen = "home" | "levelSelect" | "playing";
 
 type MobileStatProps = {
   ariaLabel: string;
@@ -131,11 +136,6 @@ function formatRecoveryState(state: GameStats["playerRecoveryState"]) {
 
 function toneStyles(tone: Tone) {
   return {
-    infected: {
-      icon: "text-[#ff7b5f] bg-[#40231d]/65 border-[#ff9c87]/35",
-      value: "text-[#ff7b5f]",
-      ring: "border-[#ffd4c8] bg-[#fff9f6]",
-    },
     clean: {
       icon: "text-[#57c8ff] bg-[#143447]/70 border-[#79d6ff]/35",
       value: "text-[#57c8ff]",
@@ -210,6 +210,7 @@ export default function GameCanvas() {
   const gameRef = useRef(game);
   const debugVisibleRef = useRef(false);
   const [stats, setStats] = useState<GameStats>(initialStats);
+  const [screen, setScreen] = useState<GameScreen>("home");
   const [debugVisible, setDebugVisible] = useState(false);
   const [debugDrawerOpen, setDebugDrawerOpen] = useState(false);
   const [debugPinned, setDebugPinned] = useState(false);
@@ -222,6 +223,13 @@ export default function GameCanvas() {
       setStats(currentGame.getStats());
     }
   }, []);
+
+  const levelOptions = game.getLevelSummaries();
+
+  useEffect(() => {
+    gameRef.current?.setPaused(screen !== "playing");
+    syncStats();
+  }, [screen, syncStats]);
 
   useEffect(() => {
     debugVisibleRef.current = debugVisible;
@@ -254,6 +262,13 @@ export default function GameCanvas() {
         return;
       }
 
+      if ((event.key === "f" || event.key === "F") && !event.repeat) {
+        event.preventDefault();
+        gameRef.current?.spawnFriendlyBot();
+        syncStats();
+        return;
+      }
+
       if (event.code !== "Space" || event.repeat) {
         return;
       }
@@ -273,6 +288,28 @@ export default function GameCanvas() {
     syncStats();
   }, [syncStats]);
 
+  const startLevel = useCallback(
+    (level: number) => {
+      gameRef.current?.setLevel(level);
+      gameRef.current?.setPaused(false);
+      setScreen("playing");
+      syncStats();
+    },
+    [syncStats],
+  );
+
+  const openHome = useCallback(() => {
+    gameRef.current?.setPaused(true);
+    setScreen("home");
+    syncStats();
+  }, [syncStats]);
+
+  const openLevelSelect = useCallback(() => {
+    gameRef.current?.setPaused(true);
+    setScreen("levelSelect");
+    syncStats();
+  }, [syncStats]);
+
   const togglePause = useCallback(() => {
     gameRef.current?.togglePause();
     syncStats();
@@ -288,6 +325,19 @@ export default function GameCanvas() {
     syncStats();
   }, [syncStats]);
 
+  const spawnFriendlyBot = useCallback(() => {
+    gameRef.current?.spawnFriendlyBot();
+    syncStats();
+  }, [syncStats]);
+
+  const chooseUpgrade = useCallback(
+    (choiceId: GameStats["upgradeChoices"][number]["id"]) => {
+      gameRef.current?.chooseUpgrade(choiceId);
+      syncStats();
+    },
+    [syncStats],
+  );
+
   const changeDifficulty = useCallback(
     (difficulty: AIDifficulty) => {
       gameRef.current?.setDifficulty(difficulty);
@@ -296,15 +346,6 @@ export default function GameCanvas() {
     [syncStats],
   );
 
-  const changeLevel = useCallback(
-    (delta: number) => {
-      gameRef.current?.setLevel(stats.level + delta);
-      syncStats();
-    },
-    [stats.level, syncStats],
-  );
-
-  const infectionPercent = Math.round(stats.infectionLevel);
   const enemyBaseCapturePercent = Math.round(stats.enemyBaseCapture);
   const playerBaseDangerPercent = Math.round(stats.playerBaseCapture);
   const pauseLabel = stats.paused ? "Resume game" : "Pause game";
@@ -320,10 +361,13 @@ export default function GameCanvas() {
         : stats.shieldReady
           ? "Shield ready"
           : `Shield ${Math.max(0, stats.shieldCooldownRemaining).toFixed(0)} seconds`;
+  const botLabel = stats.botReady
+    ? "Deploy support bot"
+    : `Support bot ${Math.max(0, stats.botCooldownRemaining).toFixed(0)} seconds`;
   const playerHealthPercent = Math.round((stats.playerHealth / Math.max(1, stats.playerMaxHealth)) * 100);
   const playerShieldPercent = Math.round((stats.playerShield / Math.max(1, stats.playerMaxShield)) * 100);
   const playerXpLabel =
-    Number.isFinite(stats.playerNextLevelXp) && stats.playerLevel < 5
+    Number.isFinite(stats.playerNextLevelXp) && stats.playerLevel < 10
       ? `${stats.playerXp}/${stats.playerNextLevelXp}`
       : "MAX";
   const recoveryLabel = formatRecoveryState(stats.playerRecoveryState);
@@ -339,7 +383,7 @@ export default function GameCanvas() {
         : "text-white/62";
   const enemySummary =
     stats.enemyCount > 0
-      ? `Capture enemy base - Mini-bases ${stats.nodePlayerCount}-${stats.nodeEnemyCount} - Your base danger ${playerBaseDangerPercent}%`
+      ? `Capture enemy base - Mini-bases ${stats.nodePlayerSuppliedCount}/${stats.nodePlayerCount}-${stats.nodeEnemySuppliedCount}/${stats.nodeEnemyCount} supplied - Your base danger ${playerBaseDangerPercent}%`
       : "Capture the enemy base - use mini-bases to heal";
 
   return (
@@ -351,8 +395,143 @@ export default function GameCanvas() {
         onStats={setStats}
       />
 
-      <div className="pointer-events-auto absolute inset-x-0 top-0 z-20 flex h-12 items-center gap-2 overflow-x-auto border-b border-white/10 bg-[linear-gradient(180deg,rgba(12,22,36,0.92),rgba(12,22,36,0.62))] px-2 text-white shadow-[0_18px_54px_rgba(2,8,18,0.28)] backdrop-blur-2xl [scrollbar-width:none] sm:px-3">
-        <div className="flex h-10 shrink-0 items-center gap-2 rounded-[14px] px-2">
+      {screen !== "playing" && (
+        <div className="pointer-events-auto absolute inset-0 z-50 overflow-y-auto bg-[radial-gradient(circle_at_30%_20%,rgba(87,200,255,0.16),transparent_34%),radial-gradient(circle_at_78%_28%,rgba(255,118,95,0.16),transparent_32%),linear-gradient(135deg,rgba(7,15,28,0.96),rgba(12,23,38,0.92))] px-4 py-6 text-white backdrop-blur-xl">
+          <div className="mx-auto flex min-h-[calc(100svh-3rem)] w-full max-w-6xl flex-col">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <span className="grid size-11 place-items-center rounded-[16px] border border-white/12 bg-white/[0.08] text-[#57c8ff] shadow-[inset_0_1px_0_rgba(255,255,255,0.12)]">
+                  <Sparkles className="size-5" strokeWidth={1.9} />
+                </span>
+                <div>
+                  <div className="text-2xl font-semibold tracking-[-0.03em]">
+                    Color <span className="text-[#ff765f]">Infection</span>
+                  </div>
+                  <div className="text-xs font-medium uppercase tracking-[0.16em] text-white/44">Capture Arena</div>
+                </div>
+              </div>
+              {screen === "levelSelect" && (
+                <button
+                  className="inline-flex h-10 items-center gap-2 rounded-[14px] border border-white/14 bg-white/[0.08] px-3 text-sm font-semibold text-white/86 backdrop-blur-xl transition hover:bg-white/[0.13] focus:outline-none focus:ring-2 focus:ring-[#57c8ff]/45"
+                  onClick={() => setScreen("home")}
+                  type="button"
+                >
+                  <Home className="size-4" strokeWidth={2} />
+                  Home
+                </button>
+              )}
+            </div>
+
+            {screen === "home" ? (
+              <div className="grid flex-1 items-center gap-8 py-8 lg:grid-cols-[1fr_420px]">
+                <div className="max-w-3xl">
+                  <div className="mb-5 inline-flex rounded-full border border-[#57c8ff]/20 bg-[#57c8ff]/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-[#8ad8ff]">
+                    Base capture prototype V1.17
+                  </div>
+                  <h1 className="max-w-2xl text-5xl font-semibold leading-[0.95] tracking-[-0.05em] text-white sm:text-7xl">
+                    Capture the network. Break the infection.
+                  </h1>
+                  <p className="mt-5 max-w-2xl text-base leading-7 text-white/64 sm:text-lg">
+                    Move your core through the arena, capture mini-bases, keep them connected to your main base, recover through supplied stations, and push into the enemy base when the route is safe.
+                  </p>
+                  <div className="mt-7 flex flex-wrap gap-3">
+                    <button
+                      className="inline-flex h-12 items-center gap-2 rounded-[16px] bg-[#57c8ff] px-5 text-sm font-bold text-slate-950 shadow-[0_18px_44px_rgba(87,200,255,0.22)] transition hover:-translate-y-0.5 hover:bg-[#8ad8ff] focus:outline-none focus:ring-2 focus:ring-[#8ad8ff]/70"
+                      onClick={() => setScreen("levelSelect")}
+                      type="button"
+                    >
+                      <Play className="size-4" fill="currentColor" strokeWidth={2} />
+                      Start
+                    </button>
+                    <button
+                      className="inline-flex h-12 items-center gap-2 rounded-[16px] border border-white/14 bg-white/[0.08] px-5 text-sm font-semibold text-white backdrop-blur-xl transition hover:-translate-y-0.5 hover:bg-white/[0.13] focus:outline-none focus:ring-2 focus:ring-[#57c8ff]/45"
+                      onClick={() => startLevel(stats.level)}
+                      type="button"
+                    >
+                      Continue Level {stats.level}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="rounded-[26px] border border-white/14 bg-white/[0.075] p-5 shadow-[0_24px_70px_rgba(2,8,18,0.34)] backdrop-blur-2xl">
+                  <div className="mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.12em] text-white/58">
+                    <Flag className="size-4 text-[#57c8ff]" strokeWidth={2} />
+                    Connected bases
+                  </div>
+                  <div className="space-y-4 text-sm leading-6 text-white/68">
+                    <p>Your main base is the supply source. A mini-base becomes supplied when it is close enough to your main base or another supplied mini-base.</p>
+                    <p>Supplied mini-bases pulse brighter, draw a link line, and heal your core for 6 HP/sec after combat recovery delay.</p>
+                    <p>Isolated mini-bases still belong to you, but they look dimmer and do not provide the fast healing bonus until you connect the chain.</p>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-1 flex-col py-8">
+                <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
+                  <div>
+                    <h1 className="text-4xl font-semibold tracking-[-0.04em] text-white">Select Level</h1>
+                    <p className="mt-2 max-w-2xl text-sm leading-6 text-white/58">
+                      Six arenas introduce the current mechanics gradually. Pick a level, then capture the enemy main base.
+                    </p>
+                  </div>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {levelOptions.map((level) => (
+                    <button
+                      className="group min-h-[156px] rounded-[22px] border border-white/12 bg-white/[0.075] p-4 text-left shadow-[0_18px_52px_rgba(2,8,18,0.2)] backdrop-blur-2xl transition hover:-translate-y-1 hover:border-[#57c8ff]/36 hover:bg-white/[0.12] focus:outline-none focus:ring-2 focus:ring-[#57c8ff]/45"
+                      key={level.number}
+                      onClick={() => startLevel(level.number)}
+                      type="button"
+                    >
+                      <div className="mb-5 flex items-center justify-between gap-3">
+                        <span className="grid size-10 place-items-center rounded-[14px] border border-white/12 bg-white/[0.08] text-sm font-bold text-[#8ad8ff]">
+                          {level.number}
+                        </span>
+                        <span className="rounded-full bg-white/[0.08] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-white/46">
+                          {level.enemyTypes.length === 0 ? "Training" : `${level.enemyTypes.length} enemy`}
+                        </span>
+                      </div>
+                      <div className="text-lg font-semibold text-white">{level.name}</div>
+                      <p className="mt-2 text-sm leading-6 text-white/58">{level.summary}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {stats.hint && (
+        <div className="pointer-events-none absolute left-1/2 top-16 z-30 w-[min(92vw,520px)] -translate-x-1/2 rounded-[16px] border border-white/14 bg-[linear-gradient(180deg,rgba(22,33,50,0.78),rgba(12,20,34,0.68))] px-4 py-2 text-center text-sm font-medium text-white/86 shadow-[0_18px_48px_rgba(2,8,18,0.28)] backdrop-blur-2xl">
+          {stats.hint}
+        </div>
+      )}
+
+      {stats.upgradePending && (
+        <div className="pointer-events-auto absolute left-1/2 top-28 z-30 grid w-[min(94vw,680px)] -translate-x-1/2 gap-2 rounded-[20px] border border-[#57c8ff]/22 bg-[linear-gradient(180deg,rgba(22,38,58,0.86),rgba(13,22,36,0.78))] p-3 shadow-[0_22px_70px_rgba(2,8,18,0.34)] backdrop-blur-2xl sm:grid-cols-4">
+          <div className="sm:col-span-4 flex items-center justify-between gap-3 px-1 pb-1">
+            <div className="text-sm font-semibold text-white">Choose upgrade</div>
+            <div className="rounded-full border border-white/12 bg-white/[0.08] px-2.5 py-1 text-[11px] font-semibold text-white/62">
+              {stats.pendingUpgradeCount} pending
+            </div>
+          </div>
+          {stats.upgradeChoices.map((choice) => (
+            <button
+              className="rounded-[14px] border border-white/12 bg-white/[0.075] px-3 py-2 text-left transition hover:border-[#57c8ff]/45 hover:bg-white/[0.12] focus:outline-none focus:ring-2 focus:ring-[#57c8ff]/45"
+              key={choice.id}
+              onClick={() => chooseUpgrade(choice.id)}
+              type="button"
+            >
+              <div className="text-sm font-semibold text-white">{choice.label}</div>
+              <div className="mt-1 text-[11px] leading-4 text-white/58">{choice.description}</div>
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className="pointer-events-auto absolute inset-x-0 top-0 z-20 flex h-20 items-center gap-2 overflow-x-auto border-b border-white/10 bg-[linear-gradient(180deg,rgba(12,22,36,0.94),rgba(12,22,36,0.68))] px-2 text-white shadow-[0_18px_54px_rgba(2,8,18,0.28)] backdrop-blur-2xl [scrollbar-width:none] sm:px-3">
+        <div className="flex h-14 shrink-0 items-center gap-2 rounded-[14px] px-2">
           <span className="grid size-8 place-items-center rounded-full bg-white/7 ring-1 ring-white/12">
             <Sparkles className="size-4 text-[#57c8ff]" strokeWidth={1.9} />
           </span>
@@ -361,25 +540,46 @@ export default function GameCanvas() {
           </div>
         </div>
 
-        <div className="flex h-10 shrink-0 items-center overflow-hidden rounded-[14px] border border-white/14 bg-white/[0.075] shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-2xl">
+        <div className="flex h-14 shrink-0 items-center gap-1 rounded-[14px] border border-white/14 bg-white/[0.075] px-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-2xl">
+          <button
+            aria-label="Return to home screen"
+            className="grid size-10 place-items-center rounded-[11px] text-white/72 transition hover:bg-white/10 hover:text-white focus:outline-none focus:ring-2 focus:ring-[#57c8ff]/45"
+            onClick={openHome}
+            title="Home"
+            type="button"
+          >
+            <Home className="size-4.5" strokeWidth={2} />
+          </button>
+          <button
+            aria-label="Open level select"
+            className="grid size-10 place-items-center rounded-[11px] text-white/72 transition hover:bg-white/10 hover:text-white focus:outline-none focus:ring-2 focus:ring-[#57c8ff]/45"
+            onClick={openLevelSelect}
+            title="Levels"
+            type="button"
+          >
+            <Map className="size-4.5" strokeWidth={2} />
+          </button>
+        </div>
+
+        <div className="flex h-14 shrink-0 items-center overflow-hidden rounded-[14px] border border-white/14 bg-white/[0.075] shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-2xl">
           <DesktopStatPill
-            icon={CircleDot}
-            label="Infected"
-            tone="infected"
-            value={stats.infectedCount.toLocaleString()}
+            icon={Shield}
+            label="Core"
+            tone="clean"
+            value={`L${stats.playerLevel}`}
           />
           <div className="h-5 w-px bg-white/12" />
           <DesktopStatPill
-            icon={Crosshair}
-            label="Cleansed"
+            icon={Flag}
+            label="Supplied"
             tone="clean"
-            value={stats.cleansedCount.toLocaleString()}
+            value={`${stats.nodePlayerSuppliedCount}/${Math.max(1, stats.nodePlayerCount)}`}
           />
           <div className="h-5 w-px bg-white/12" />
           <DesktopStatPill icon={Timer} label="Time" tone="neutral" value={formatTime(stats.remainingSeconds)} />
         </div>
 
-        <div className="flex h-10 min-w-[320px] flex-1 items-center gap-3 rounded-[14px] border border-white/14 bg-white/[0.075] px-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-2xl">
+        <div className="flex h-14 min-w-[320px] flex-1 items-center gap-3 rounded-[14px] border border-white/14 bg-white/[0.075] px-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-2xl">
           <span className="grid size-7 shrink-0 place-items-center rounded-full bg-white/8 text-white/80 ring-1 ring-white/10">
             <Activity className="size-3.5" strokeWidth={1.9} />
           </span>
@@ -398,7 +598,7 @@ export default function GameCanvas() {
           </div>
         </div>
 
-        <div className="flex h-10 shrink-0 items-center gap-1 rounded-[14px] border border-white/14 bg-white/[0.075] px-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-2xl">
+        <div className="flex h-14 shrink-0 items-center gap-1 rounded-[14px] border border-white/14 bg-white/[0.075] px-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-2xl">
           <button
             aria-label={shockwaveLabel}
             className="relative grid size-8 place-items-center rounded-[10px] text-[#57c8ff] transition hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-[#57c8ff]/45 disabled:cursor-not-allowed disabled:opacity-42"
@@ -429,9 +629,22 @@ export default function GameCanvas() {
               </span>
             )}
           </button>
+          <button
+            aria-label={botLabel}
+            className="relative grid size-8 place-items-center rounded-[10px] text-[#8ff7d1] transition hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-[#57c8ff]/45 disabled:cursor-not-allowed disabled:opacity-42"
+            disabled={!stats.botReady || stats.paused || stats.status !== "playing"}
+            onClick={spawnFriendlyBot}
+            title={botLabel}
+            type="button"
+          >
+            <Bot className="size-4.5" strokeWidth={2.2} />
+            <span className="absolute -right-1 -top-1 rounded-full bg-white/16 px-1 text-[9px] font-semibold text-white">
+              {stats.botReady ? stats.friendlyBotCount : Math.ceil(stats.botCooldownRemaining)}
+            </span>
+          </button>
         </div>
 
-        <div className="flex h-10 shrink-0 items-center gap-2 rounded-[14px] border border-white/14 bg-white/[0.075] px-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-2xl">
+        <div className="flex h-14 shrink-0 items-center gap-2 rounded-[14px] border border-white/14 bg-white/[0.075] px-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-2xl">
           <Shield className="size-4 text-[#dcd3ff]" strokeWidth={2} />
           <div className="leading-tight">
             <div className={`text-[10px] font-semibold uppercase tracking-[0.08em] ${recoveryTone}`}>
@@ -443,37 +656,9 @@ export default function GameCanvas() {
           </div>
         </div>
 
-        <div className="flex h-10 shrink-0 items-center gap-1 rounded-[14px] border border-white/14 bg-white/[0.075] px-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-2xl">
-          <button
-            aria-label="Previous level"
-            className="grid size-7 place-items-center rounded-[9px] text-white/70 transition hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-[#57c8ff]/45 disabled:cursor-not-allowed disabled:opacity-30"
-            disabled={stats.level <= 1}
-            onClick={() => changeLevel(-1)}
-            type="button"
-          >
-            <ChevronLeft className="size-4" strokeWidth={2.2} />
-          </button>
-          <div className="flex min-w-[128px] items-center gap-2 px-1">
-            <Flag className="size-4 text-[#57c8ff]" strokeWidth={2} />
-            <div className="min-w-0 leading-tight">
-              <div className="text-[10px] font-semibold uppercase text-white/42">Level {stats.level}/{stats.maxLevel}</div>
-              <div className="max-w-[112px] truncate text-xs font-semibold text-white/88">{stats.levelName}</div>
-            </div>
-          </div>
-          <button
-            aria-label="Next level"
-            className="grid size-7 place-items-center rounded-[9px] text-white/70 transition hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-[#57c8ff]/45 disabled:cursor-not-allowed disabled:opacity-30"
-            disabled={stats.level >= stats.maxLevel}
-            onClick={() => changeLevel(1)}
-            type="button"
-          >
-            <ChevronRight className="size-4" strokeWidth={2.2} />
-          </button>
-        </div>
-
         <select
           aria-label="AI difficulty"
-          className="h-10 shrink-0 rounded-[14px] border border-white/14 bg-white/[0.075] px-2 text-[11px] font-semibold uppercase text-white outline-none shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-2xl transition focus:border-[#57c8ff]/60 focus:ring-2 focus:ring-[#57c8ff]/25"
+          className="h-14 shrink-0 rounded-[14px] border border-white/14 bg-white/[0.075] px-2 text-[11px] font-semibold uppercase text-white outline-none shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-2xl transition focus:border-[#57c8ff]/60 focus:ring-2 focus:ring-[#57c8ff]/25"
           onChange={(event) => changeDifficulty(event.target.value as AIDifficulty)}
           value={stats.aiDifficulty}
         >
@@ -484,7 +669,7 @@ export default function GameCanvas() {
 
         <button
           aria-label="Reset game"
-          className="inline-flex h-10 shrink-0 items-center gap-2 rounded-[14px] border border-white/14 bg-white/[0.075] px-3 text-sm font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-2xl transition hover:bg-white/12 focus:outline-none focus:ring-2 focus:ring-[#57c8ff]/45"
+          className="inline-flex h-14 shrink-0 items-center gap-2 rounded-[14px] border border-white/14 bg-white/[0.075] px-3 text-sm font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-2xl transition hover:bg-white/12 focus:outline-none focus:ring-2 focus:ring-[#57c8ff]/45"
           onClick={resetGame}
           type="button"
         >
@@ -495,7 +680,7 @@ export default function GameCanvas() {
         <button
           aria-label={pauseLabel}
           aria-pressed={stats.paused}
-          className="grid h-10 w-12 shrink-0 place-items-center rounded-[14px] border border-white/14 bg-white/[0.075] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-2xl transition hover:bg-white/12 focus:outline-none focus:ring-2 focus:ring-[#57c8ff]/45"
+          className="grid h-14 w-12 shrink-0 place-items-center rounded-[14px] border border-white/14 bg-white/[0.075] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-2xl transition hover:bg-white/12 focus:outline-none focus:ring-2 focus:ring-[#57c8ff]/45"
           onClick={togglePause}
           title={stats.paused ? "Resume" : "Pause"}
           type="button"
@@ -529,17 +714,17 @@ export default function GameCanvas() {
         <div className="pointer-events-auto hidden items-center gap-4 lg:flex">
           <div className="flex overflow-hidden rounded-[24px] border border-white/14 bg-[linear-gradient(180deg,rgba(32,45,66,0.9),rgba(28,39,57,0.78))] text-white shadow-[0_22px_70px_rgba(12,19,34,0.28)] backdrop-blur-2xl">
             <DesktopStatPill
-              icon={CircleDot}
-              label="Infected"
-              tone="infected"
-              value={stats.infectedCount.toLocaleString()}
+              icon={Shield}
+              label="Core"
+              tone="clean"
+              value={`L${stats.playerLevel}`}
             />
             <div className="my-3 w-px bg-white/10" />
             <DesktopStatPill
-              icon={Crosshair}
-              label="Cleansed"
+              icon={Flag}
+              label="Supplied"
               tone="clean"
-              value={stats.cleansedCount.toLocaleString()}
+              value={`${stats.nodePlayerSuppliedCount}/${Math.max(1, stats.nodePlayerCount)}`}
             />
             <div className="my-3 w-px bg-white/10" />
             <DesktopStatPill
@@ -558,13 +743,13 @@ export default function GameCanvas() {
                 </span>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-3">
-                    <span className="text-[1.05rem] font-medium text-white/88">Infection level</span>
-                    <span className="text-[1.15rem] font-semibold text-[#ff7b5f]">{infectionPercent}%</span>
+                    <span className="text-[1.05rem] font-medium text-white/88">Enemy base</span>
+                    <span className="text-[1.15rem] font-semibold text-[#57c8ff]">{enemyBaseCapturePercent}%</span>
                   </div>
                   <div className="mt-1 h-2.5 overflow-hidden rounded-full bg-white/10">
                     <div
-                      className="h-full rounded-full bg-gradient-to-r from-[#ff6157] to-[#ffb06f] transition-[width] duration-300"
-                      style={{ width: `${infectionPercent}%` }}
+                      className="h-full rounded-full bg-gradient-to-r from-[#57c8ff] to-[#8ff7d1] transition-[width] duration-300"
+                      style={{ width: `${enemyBaseCapturePercent}%` }}
                     />
                   </div>
                   <div className="mt-2 truncate text-center text-sm text-white/62">{enemySummary}</div>
@@ -634,6 +819,15 @@ export default function GameCanvas() {
             <Shield className="size-4" strokeWidth={2.2} />
           </button>
           <button
+            aria-label={botLabel}
+            className="grid size-9 place-items-center rounded-full bg-[#effff9] text-[#0f9f7b] transition hover:bg-[#ddfff3] focus:outline-none focus:ring-2 focus:ring-[#34d399]/50 disabled:cursor-not-allowed disabled:opacity-45"
+            disabled={!stats.botReady || stats.paused || stats.status !== "playing"}
+            onClick={spawnFriendlyBot}
+            type="button"
+          >
+            <Bot className="size-4" strokeWidth={2.2} />
+          </button>
+          <button
             aria-label={pauseLabel}
             aria-pressed={stats.paused}
             className="grid size-9 place-items-center rounded-full bg-slate-900 text-white transition hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-[#1eaee9]/50"
@@ -669,6 +863,14 @@ export default function GameCanvas() {
               onClick={activateShield}
               tooltip={stats.shieldActive ? "Shield: 50% clash damage reduction" : shieldLabel}
             />
+            <DockButton
+              active={stats.botReady}
+              disabled={!stats.botReady || stats.paused || stats.status !== "playing"}
+              icon={Bot}
+              label={stats.botReady ? "Bot" : `${Math.ceil(stats.botCooldownRemaining)}s`}
+              onClick={spawnFriendlyBot}
+              tooltip={botLabel}
+            />
           </div>
         </div>
       </div>
@@ -684,40 +886,6 @@ export default function GameCanvas() {
         <option value="hard">Hard AI</option>
       </select>
 
-      <div className="hidden">
-        <button
-          aria-label="Previous level"
-          className="grid size-8 place-items-center rounded-full text-slate-600 transition hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-[#1eaee9]/50 disabled:cursor-not-allowed disabled:opacity-35 md:size-9"
-          disabled={stats.level <= 1}
-          onClick={() => changeLevel(-1)}
-          type="button"
-        >
-          <ChevronLeft className="size-4" strokeWidth={2.2} />
-        </button>
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="grid size-8 shrink-0 place-items-center rounded-full bg-[#edfaff] text-[#1eaee9]">
-            <Flag className="size-4" strokeWidth={2} />
-          </span>
-          <div className="min-w-0 leading-tight">
-            <div className="whitespace-nowrap text-xs font-semibold uppercase text-slate-400 md:text-[11px]">
-              Level {stats.level}/{stats.maxLevel}
-            </div>
-            <div className="truncate text-sm font-semibold text-slate-900 md:max-w-[170px] md:text-base">
-              {stats.levelName}
-            </div>
-          </div>
-        </div>
-        <button
-          aria-label="Next level"
-          className="grid size-8 place-items-center rounded-full text-slate-600 transition hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-[#1eaee9]/50 disabled:cursor-not-allowed disabled:opacity-35 md:size-9"
-          disabled={stats.level >= stats.maxLevel}
-          onClick={() => changeLevel(1)}
-          type="button"
-        >
-          <ChevronRight className="size-4" strokeWidth={2.2} />
-        </button>
-      </div>
-
       <button
         aria-label="Reset game"
         className="hidden"
@@ -730,18 +898,18 @@ export default function GameCanvas() {
 
       <div className="hidden">
         <MobileStat
-          ariaLabel={`${stats.infectedCount} infected dots`}
-          icon={CircleDot}
-          label="Infected"
-          tone="infected"
-          value={stats.infectedCount.toLocaleString()}
+          ariaLabel={`Player core level ${stats.playerLevel}`}
+          icon={Shield}
+          label="Core"
+          tone="clean"
+          value={`L${stats.playerLevel}`}
         />
         <MobileStat
-          ariaLabel={`${stats.cleansedCount} cleansed dots`}
-          icon={Crosshair}
-          label="Cured"
+          ariaLabel={`${stats.nodePlayerSuppliedCount} supplied mini-bases out of ${stats.nodePlayerCount}`}
+          icon={Flag}
+          label="Supply"
           tone="clean"
-          value={stats.cleansedCount.toLocaleString()}
+          value={`${stats.nodePlayerSuppliedCount}/${Math.max(1, stats.nodePlayerCount)}`}
         />
         <MobileStat
           ariaLabel={`Player level ${stats.playerLevel}, ${playerHealthPercent} percent health, ${playerShieldPercent} percent shield`}
@@ -911,6 +1079,8 @@ export default function GameCanvas() {
                 <span className="text-right">{Math.round(debugStats.baseProximity * 100)}%</span>
                 <span>AI</span>
                 <span className="text-right">{debugStats.aiDifficulty}</span>
+                <span>Supply Net</span>
+                <span className="text-right">{debugStats.baseSupplySummary}</span>
                 <span>Deaths</span>
                 <span className="text-right">
                   P{debugStats.playerDeaths}/E{debugStats.enemyDeaths}
@@ -962,8 +1132,8 @@ export default function GameCanvas() {
             )}
             <p className="mt-2 text-sm leading-6 text-slate-600">
               {stats.status === "won"
-                ? "The player core controls 70% of the active field."
-                : "The infection controls 75% of the active field."}
+                ? "Enemy main base captured."
+                : "Your main base was captured."}
             </p>
             <button
               className="mt-5 inline-flex h-11 items-center gap-2 rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white transition hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-[#1eaee9]/50"
