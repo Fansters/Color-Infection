@@ -2519,6 +2519,13 @@ export class Game {
 			return;
 		}
 
+		const sourceEngaged =
+			distance(source.x, source.y, target.x, target.y) <= source.combatRadius + target.combatRadius + 6;
+
+		if (!sourceEngaged) {
+			return;
+		}
+
 		source.lastDamageDealtAt = this.time;
 		source.combatLockoutTimer = COMBAT_LOCKOUT_SECONDS;
 		source.isInCombat = true;
@@ -3797,7 +3804,6 @@ export class Game {
 			if (pulse.kind === "shockwave" && enemy.canMove) {
 				enemy.lastClashAt = this.time;
 				enemy.combatLockoutTimer = COMBAT_LOCKOUT_SECONDS;
-				this.player.lastDamageDealtAt = this.time;
 				enemy.breakTimer = Math.max(enemy.breakTimer, 0.42 + edge * 0.18);
 				enemy.combatState = "break";
 				enemy.hitFlashTimer = Math.max(enemy.hitFlashTimer, 0.18);

@@ -360,7 +360,6 @@ export default function GameCanvas() {
   );
 
   const enemyBaseCapturePercent = Math.round(stats.enemyBaseCapture);
-  const playerBaseDangerPercent = Math.round(stats.playerBaseCapture);
   const pauseLabel = stats.paused ? "Resume game" : "Pause game";
   const PauseIcon = stats.paused ? Play : Pause;
   const shockwaveLabel = stats.shockwaveReady
@@ -394,10 +393,7 @@ export default function GameCanvas() {
       : stats.playerRecoveryState === "regenBase" || stats.playerRecoveryState === "regenOwnTerritory"
         ? "text-[#8ff7d1]"
         : "text-white/62";
-  const enemySummary =
-    stats.enemyCount > 0
-      ? `Main objective - capture enemy base! Your base danger ${playerBaseDangerPercent}%`
-      : "Main objective - capture enemy base!";
+  const respawnCountdown = Math.ceil(stats.playerRespawnTimer);
 
   return (
     <section className="relative min-h-svh w-full overflow-hidden bg-[#050d14] text-white">
@@ -606,7 +602,6 @@ export default function GameCanvas() {
               </div>
               <span className="w-10 text-right text-base font-semibold text-[#57c8ff]">{enemyBaseCapturePercent}%</span>
             </div>
-            <div className="truncate text-center text-[10px] font-semibold uppercase tracking-[0.08em] text-white/56">{enemySummary}</div>
           </div>
         </div>
 
@@ -654,6 +649,19 @@ export default function GameCanvas() {
           <PauseIcon className="size-5" strokeWidth={2.2} />
         </button>
       </div>
+
+      <div className="pointer-events-none absolute left-3 top-[88px] z-20 rounded-[8px] border border-[#57c8ff]/24 bg-[linear-gradient(180deg,rgba(7,18,30,0.82),rgba(3,10,18,0.7))] px-6 py-4 text-[11px] font-black uppercase tracking-[0.14em] text-[#b9efff] shadow-[0_14px_44px_rgba(0,8,18,0.32),inset_0_1px_0_rgba(255,255,255,0.1)] backdrop-blur-xl sm:left-4 sm:text-xs">
+        Main objective - capture enemy base!
+      </div>
+
+      {stats.playerRespawnTimer > 0 && (
+        <div className="pointer-events-none absolute bottom-28 left-1/2 z-20 flex -translate-x-1/2 w-[175px] items-center gap-2 rounded-[8px]  px-4 py-2 text-[#9dffd0] shadow-[0_16px_54px_rgba(29,255,160,0.14),inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-xl">
+          <span className="pb-1 text-[11px] font-black uppercase tracking-[0.14em]">Respawning in</span>
+          <span className="animate-pulse text-3xl font-black leading-none text-[#72ff8c] drop-shadow-[0_0_16px_rgba(114,255,174,0.42)]">
+            {respawnCountdown}
+          </span>
+        </div>
+      )}
 
       <div className="pointer-events-auto absolute bottom-4 left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-[22px] border border-white/14 bg-[linear-gradient(180deg,rgba(11,26,38,0.76),rgba(6,17,27,0.68))] p-2 text-white shadow-[0_22px_80px_rgba(0,6,14,0.42),inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-2xl">
         <DockButton
@@ -748,7 +756,6 @@ export default function GameCanvas() {
                       style={{ width: `${enemyBaseCapturePercent}%` }}
                     />
                   </div>
-                  <div className="mt-2 truncate text-center text-sm text-white/62">{enemySummary}</div>
                 </div>
               </div>
               <div className="w-[152px] shrink-0">

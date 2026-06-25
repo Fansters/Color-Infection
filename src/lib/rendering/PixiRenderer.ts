@@ -7,11 +7,13 @@ import {
   HAZE_SCALE,
   CHUNK_SIZE,
   ENEMY_REVEAL_SECONDS,
+  type ActivePulse,
   type Agent,
   type AgentKind,
   type Arena,
   type GameRenderState,
   type PixiRenderMetrics,
+  type Ripple,
 } from "@/lib/game/Game";
 import { palette, rgba, type Rgb } from "@/lib/game/colors";
 import { clamp, smoothstep } from "@/lib/game/math";
@@ -931,6 +933,30 @@ export class PixiRenderer {
     return clamp(fadeIn * fadeOut, 0, 0.9);
   }
 
+  private shouldShowEnemyPulse(pulse: ActivePulse, state: GameRenderState) {
+    if (pulse.kind !== "enemy" || pulse.owner !== "enemy") {
+      return true;
+    }
+
+    return state.enemies.some(
+      (enemy) =>
+        this.shouldShowEnemyCore(enemy, state) &&
+        Math.hypot(enemy.x - pulse.x, enemy.y - pulse.y) <= enemy.influenceRadius + 24,
+    );
+  }
+
+  private shouldShowEnemyRipple(ripple: Ripple, state: GameRenderState) {
+    if (ripple.color !== "enemy") {
+      return true;
+    }
+
+    return state.enemies.some(
+      (enemy) =>
+        this.shouldShowEnemyCore(enemy, state) &&
+        Math.hypot(enemy.x - ripple.x, enemy.y - ripple.y) <= enemy.influenceRadius + 48,
+    );
+  }
+
   private drawCoreHealthBars(state: GameRenderState) {
     const dt = clamp((this.app?.ticker.deltaMS ?? 16.7) / 1000, 0, 0.05);
     for (const label of this.coreLevelTexts.values()) {
@@ -1224,6 +1250,11 @@ export class PixiRenderer {
 
   private drawEffects(state: GameRenderState) {
     this.ripples?.sync(state.ripples, (sprite, ripple) => {
+      if (!this.shouldShowEnemyRipple(ripple, state)) {
+        sprite.visible = false;
+        return;
+      }
+
       const progress = ripple.age / ripple.duration;
       const radius = ripple.radius * (0.35 + progress);
       const alpha = (1 - progress) * 0.42;
@@ -1238,9 +1269,15 @@ export class PixiRenderer {
       sprite.tint = color;
       sprite.alpha = alpha;
       sprite.scale.set(Math.max(0.04, radius / 110));
+      sprite.visible = true;
     });
 
     this.pulses?.sync(state.pulses, (sprite, pulse) => {
+      if (!this.shouldShowEnemyPulse(pulse, state)) {
+        sprite.visible = false;
+        return;
+      }
+
       const progress = clamp(pulse.age / pulse.duration, 0, 1);
       const alpha = (1 - progress) * (pulse.owner === "player" ? 0.48 : 0.36);
       const color =
@@ -1255,6 +1292,7 @@ export class PixiRenderer {
       sprite.tint = color;
       sprite.alpha = alpha;
       sprite.scale.set(Math.max(0.04, radius / 110));
+      sprite.visible = true;
     });
 
     this.contestedZones?.sync(state.contestedZones, (graphic, zone) => {
