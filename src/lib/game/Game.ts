@@ -1029,7 +1029,7 @@ export class Game {
   private playerUpgradeBonuses = {
     power: 0,
     shield: 0,
-    speed: 1,
+    speed: 0,
     radius: 1,
   };
   private playerDeaths = 0;
@@ -1162,7 +1162,7 @@ export class Game {
     this.playerUpgradeBonuses = {
       power: 0,
       shield: 0,
-      speed: 1,
+      speed: 0,
       radius: 1,
     };
     this.buildLevel();
@@ -1253,7 +1253,7 @@ export class Game {
     } else if (choice.id === "shield") {
       this.playerUpgradeBonuses.shield += 12;
     } else if (choice.id === "speed") {
-      this.playerUpgradeBonuses.speed *= 1.08;
+      this.playerUpgradeBonuses.speed = clamp(this.playerUpgradeBonuses.speed + 0.05, 0, 0.5);
     }
 
     this.pendingUpgradeCount = Math.max(0, this.pendingUpgradeCount - 1);
@@ -1871,7 +1871,6 @@ export class Game {
 
     if (agent.kind === "player") {
       const levelOffset = level - 1;
-      const speedScale = level >= 8 ? 0.9 : level >= 5 ? 0.94 : 1;
       agent.bodyRadius = agent.baseRadius + levelOffset * 1.15;
       agent.collisionRadius = agent.bodyRadius + 2;
       agent.combatRadius = agent.baseCombatRadius + levelOffset * 3;
@@ -1884,7 +1883,7 @@ export class Game {
       agent.mass = 1.1 + levelOffset * 0.18;
       agent.power = 20 + levelOffset * 3.5;
       agent.spreadPower = 1 + levelOffset * 0.08;
-      agent.speed = agent.moveSpeed * speedScale;
+      agent.speed = agent.moveSpeed;
     } else {
       const settings = ENEMY_SETTINGS[agent.type as EnemyType];
       const levelOffset = level - 1;
@@ -1923,8 +1922,7 @@ export class Game {
 
     player.maxShield += this.playerUpgradeBonuses.shield;
     player.shield = clamp(player.maxShield * shieldRatio, 0, player.maxShield);
-    player.speed *= this.playerUpgradeBonuses.speed;
-    player.moveSpeed = player.speed;
+    player.speed = player.moveSpeed * (1 + this.playerUpgradeBonuses.speed);
     player.power += this.playerUpgradeBonuses.power;
     player.combatRadius *= this.playerUpgradeBonuses.radius;
     player.influenceRadius *= this.playerUpgradeBonuses.radius;
@@ -1939,7 +1937,7 @@ export class Game {
       this.pendingUpgradeChoices = [
         { id: "power", label: "Clash Power", description: "+7 core combat power" },
         { id: "shield", label: "Shield Cell", description: "+12 max shield" },
-        { id: "speed", label: "Drive", description: "+8% movement speed" },
+        { id: "speed", label: "Drive", description: "+0.05 move speed" },
       ];
     }
     this.showHint("choose-upgrade", "Choose an upgrade.", false);

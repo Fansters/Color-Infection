@@ -2,13 +2,13 @@
 
 Color Infection is a web-based 2D territorial puzzle prototype built with Next.js App Router, TypeScript, React, PixiJS, and Tailwind CSS.
 
-## Version 1.21
+## Version 1.22
 
-Version 1.21 is the Arena Boundary and Mini-Base Bonus pass. It builds on V1.20 with cleaner orb readability, compact level-up choices, a richer static arena boundary, strategic mini-base placement, max-health bonuses from captured mini-bases, dismissible hints, improved ability tooltips, and wheel/pinch-only zoom.
+Version 1.22 is the Upgrade Stability and Edge Camera pass. It builds on V1.21 with corrected additive upgrade math and a player-centered camera that can pan beyond arena edges while the orb itself stays clamped inside the playable bounds.
 
-The main V1.21 direction: the arena should be more readable and strategic without adding rendering cost. Mini-bases are now valuable health objectives, the playable bounds are visually obvious, and upgrade/hint overlays interrupt the fight less.
+The main V1.22 direction: progression should feel powerful without runaway stat bugs, and the player should remain readable near every arena edge instead of disappearing under the fixed navbar.
 
-V1.20 dark HUD and zoom, V1.19 support bots and strategic AI, V1.18 combat fixes, V1.17 start flow, V1.16 strategic bases, V1.15 fog removal, V1.13 base capture, V1.12 recovery feedback, V1.10 recovery, V1.09 radius readability, V1.08 dark glass UI, V1.07 hold-and-drag movement, V1.06 core combat, and V1.05 pulse/spike optimizations remain in place.
+V1.21 arena boundary and mini-base bonuses, V1.20 dark HUD and zoom, V1.19 support bots and strategic AI, V1.18 combat fixes, V1.17 start flow, V1.16 strategic bases, V1.15 fog removal, V1.13 base capture, V1.12 recovery feedback, V1.10 recovery, V1.09 radius readability, V1.08 dark glass UI, V1.07 hold-and-drag movement, V1.06 core combat, and V1.05 pulse/spike optimizations remain in place.
 
 The architecture is intentionally split:
 
@@ -67,6 +67,8 @@ The architecture is intentionally split:
 - Friendly captured mini-bases restore 6 health per second after recovery delay.
 - Level-ups can trigger compact upgrade choices: Clash Power, Shield Cell, or Drive.
 - If the player ignores upgrades and levels multiple times, each level-up is queued as a pending upgrade pick.
+- Drive upgrades add a fixed `+0.05` movement multiplier per pick, capped at `+0.50`, so a full speed build reaches `1.50x` instead of compounding into runaway movement.
+- Player stat refreshes no longer reduce base movement speed or write upgraded speed back into base speed.
 - Contextual hints explain key conditions such as capturing mini-bases, isolated bases, base threats, recovery supply, upgrades, and the enemy main-base goal.
 - Hints are dismissible with a close button.
 - The `Choose an upgrade` hint no longer sticks after the player chooses an upgrade.
@@ -74,6 +76,7 @@ The architecture is intentionally split:
 - Reset restarts the current level.
 - Arena zoom uses mouse wheel on desktop and pinch gestures on touch devices.
 - Visible zoom buttons were removed to keep the arena cleaner.
+- The camera follows the player even at arena edges. The orb remains physically clamped inside the arena, but the viewport can pan past the map bounds so the core stays centered and does not tuck behind the top navbar.
 
 ### Dark Glass Interface
 
@@ -113,7 +116,7 @@ The architecture is intentionally split:
 - Level 2 strengthens shockwave.
 - Level 3 unlocks the shield ability.
 - Level 4 improves shockwave utility.
-- Higher core levels continue increasing health, shields, combat power, mass, and radius, with slight high-level speed tradeoffs.
+- Higher core levels continue increasing health, shields, combat power, mass, and radius without slowing the player below base movement speed.
 - Health and shield arc rings around player and enemy cores have been removed from the orb body.
 - Floating high-contrast health/shield bars are now the primary combat readability layer:
   - health uses green, amber, and red thresholds,

@@ -193,8 +193,8 @@ export class PixiRenderer {
     this.dpr = dpr;
     this.textures = createPixiTextures();
     this.layers = createPixiLayers(app.stage);
-    this.layers.backgroundLayer.addChild(this.backgroundGraphics, this.arenaFrameGraphics);
-    this.layers.territoryLayer.addChild(this.frontlineGraphics);
+    this.layers.backgroundLayer.addChild(this.backgroundGraphics);
+    this.layers.territoryLayer.addChild(this.arenaFrameGraphics, this.frontlineGraphics);
     this.layers.modifierLayer.addChild(this.baseGraphics, this.modifierGraphics, this.destinationGraphics);
     this.layers.nodeLayer.addChild(this.nodeGraphics);
     this.layers.coreLayer.addChild(this.coreAuraGraphics, this.coreTrailGraphics, this.coreMarkGraphics, this.coreHealthBarGraphics);
@@ -305,22 +305,8 @@ export class PixiRenderer {
     const zoom = clamp(this.zoom, 0.75, 1.8);
     const focusX = state.player.active && !state.player.isRespawning ? state.player.x : state.width / 2;
     const focusY = state.player.active && !state.player.isRespawning ? state.player.y : state.height / 2;
-    let x = state.width * 0.5 - focusX * zoom;
-    let y = state.height * 0.5 - focusY * zoom;
-    const scaledArenaWidth = state.arena.width * zoom;
-    const scaledArenaHeight = state.arena.height * zoom;
-
-    if (scaledArenaWidth > state.width) {
-      x = clamp(x, state.width - state.arena.right * zoom, -state.arena.x * zoom);
-    } else {
-      x = (state.width - scaledArenaWidth) * 0.5 - state.arena.x * zoom;
-    }
-
-    if (scaledArenaHeight > state.height) {
-      y = clamp(y, state.height - state.arena.bottom * zoom, -state.arena.y * zoom);
-    } else {
-      y = (state.height - scaledArenaHeight) * 0.5 - state.arena.y * zoom;
-    }
+    const x = state.width * 0.5 - focusX * zoom;
+    const y = state.height * 0.5 - focusY * zoom;
 
     this.camera = { scale: zoom, x, y };
     this.layers.arenaLayer.scale.set(zoom);
@@ -508,6 +494,8 @@ export class PixiRenderer {
     }
 
     this.arenaFrameGraphics.clear();
+    drawArenaPath(this.arenaFrameGraphics, arena);
+    this.arenaFrameGraphics.fill({ color: 0x061724, alpha: 0.72 });
     drawArenaPath(this.arenaFrameGraphics, arena);
     this.arenaFrameGraphics.stroke({ color: 0xffffff, alpha: 0.11, width: 1 });
     drawArenaPath(this.arenaFrameGraphics, arena);
