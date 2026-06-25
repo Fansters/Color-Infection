@@ -872,7 +872,7 @@ function createEnemy(type: EnemyType, id: number, config: LevelConfig): Agent {
     active: true,
     isRespawning: false,
     respawnTimer: 0,
-    invulnerableTimer: 1,
+    invulnerableTimer: 0,
   };
 }
 
@@ -2501,7 +2501,7 @@ export class Game {
     target.combatLockoutTimer = COMBAT_LOCKOUT_SECONDS;
     target.isInCombat = true;
 
-    if (!source) {
+    if (!source || source.isMinion) {
       return;
     }
 
@@ -3878,7 +3878,7 @@ export class Game {
       }
 
       this.applyCoreDamage(enemy, playerDamage * dt, playerSide);
-      this.applyCoreDamage(playerSide, enemyDamage * dt, enemy);
+      this.applyCoreDamage(playerSide, enemyDamage * dt, playerSide.isMinion ? undefined : enemy);
   }
 
   private damageEnemy(enemy: Agent, amount: number) {
@@ -3950,7 +3950,7 @@ export class Game {
 
     enemy.active = false;
     enemy.isRespawning = true;
-    enemy.respawnTimer = randomRange(5, 8);
+    enemy.respawnTimer = 9;
     enemy.velocityX = 0;
     enemy.velocityY = 0;
     enemy.targetX = enemy.baseX;
@@ -3993,7 +3993,7 @@ export class Game {
     core.active = true;
     core.isRespawning = false;
     core.respawnTimer = 0;
-    core.invulnerableTimer = core.kind === "player" ? 2.4 : 1.8;
+    core.invulnerableTimer = core.kind === "player" ? 2.4 : 0;
     const respawnAngle = core.kind === "player" ? 0 : -Math.PI * 0.75 + core.id * 0.72;
     const respawnDistance = core.kind === "player" ? 0 : this.width < 720 ? 28 : 42;
     const respawnPoint = this.clampToArena(

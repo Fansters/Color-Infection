@@ -71,26 +71,51 @@ function createCoreTexture(hot: Rgb, edge: Rgb) {
   return createCanvasTexture(140, (ctx, size) => {
     const center = size / 2;
     const field = ctx.createRadialGradient(center, center, 0, center, center, center * 0.96);
-    field.addColorStop(0, rgbToCss(hot, 0.5));
-    field.addColorStop(0.46, rgbToCss(edge, 0.2));
+    field.addColorStop(0, rgbToCss(hot, 0.58));
+    field.addColorStop(0.42, rgbToCss(edge, 0.24));
     field.addColorStop(1, rgbToCss(edge, 0));
     ctx.fillStyle = field;
     ctx.fillRect(0, 0, size, size);
 
+    const rim = ctx.createRadialGradient(center, center, size * 0.2, center, center, size * 0.36);
+    rim.addColorStop(0, rgbToCss(hot, 0));
+    rim.addColorStop(0.64, rgbToCss(edge, 0.22));
+    rim.addColorStop(0.82, "rgba(255, 255, 255, 0.82)");
+    rim.addColorStop(1, rgbToCss(edge, 0));
+    ctx.fillStyle = rim;
+    ctx.beginPath();
+    ctx.arc(center, center, size * 0.37, 0, Math.PI * 2);
+    ctx.fill();
+
     const body = ctx.createRadialGradient(
-      center - size * 0.12,
-      center - size * 0.14,
+      center - size * 0.13,
+      center - size * 0.16,
       0,
-      center,
-      center,
-      size * 0.25,
+      center + size * 0.04,
+      center + size * 0.08,
+      size * 0.3,
     );
-    body.addColorStop(0, "rgba(255, 255, 255, 0.94)");
-    body.addColorStop(0.46, rgbToCss(hot, 0.92));
-    body.addColorStop(1, rgbToCss(edge, 0.96));
+    body.addColorStop(0, "rgba(255, 255, 255, 1)");
+    body.addColorStop(0.22, rgbToCss(hot, 0.98));
+    body.addColorStop(0.62, rgbToCss(edge, 0.98));
+    body.addColorStop(1, "rgba(2, 10, 24, 0.98)");
     ctx.fillStyle = body;
     ctx.beginPath();
-    ctx.arc(center, center, size * 0.22, 0, Math.PI * 2);
+    ctx.arc(center, center, size * 0.24, 0, Math.PI * 2);
+    ctx.fill();
+
+    const shade = ctx.createRadialGradient(center, center + size * 0.22, 0, center, center + size * 0.22, size * 0.26);
+    shade.addColorStop(0, "rgba(0, 0, 0, 0.34)");
+    shade.addColorStop(0.58, "rgba(0, 0, 0, 0.18)");
+    shade.addColorStop(1, "rgba(0, 0, 0, 0)");
+    ctx.fillStyle = shade;
+    ctx.beginPath();
+    ctx.arc(center, center, size * 0.24, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "rgba(255, 255, 255, 0.88)";
+    ctx.beginPath();
+    ctx.arc(center - size * 0.11, center - size * 0.15, size * 0.055, 0, Math.PI * 2);
     ctx.fill();
   });
 }

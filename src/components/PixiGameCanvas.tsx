@@ -7,8 +7,10 @@ import { PixiRenderer } from "@/lib/rendering/PixiRenderer";
 type PixiGameCanvasProps = {
   game: Game;
   debugVisible: boolean;
+  zoom: number;
   onStats: (stats: GameStats) => void;
   onDebugStats: (stats: GameDebugStats | null) => void;
+  onZoomChange?: (zoom: number) => void;
 };
 
 function getLocalPoint(event: React.PointerEvent<HTMLDivElement>) {
@@ -20,12 +22,13 @@ function getLocalPoint(event: React.PointerEvent<HTMLDivElement>) {
   };
 }
 
-export function PixiGameCanvas({ game, debugVisible, onStats, onDebugStats }: PixiGameCanvasProps) {
+export function PixiGameCanvas({ game, debugVisible, zoom, onStats, onDebugStats, onZoomChange }: PixiGameCanvasProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<PixiRenderer | null>(null);
   const dprRef = useRef(1);
   const debugVisibleRef = useRef(debugVisible);
   const pointerDownRef = useRef(false);
+  const zoomRef = useRef(zoom);
   const callbacksRef = useRef({ onStats, onDebugStats });
 
   useEffect(() => {
@@ -35,6 +38,11 @@ export function PixiGameCanvas({ game, debugVisible, onStats, onDebugStats }: Pi
   useEffect(() => {
     debugVisibleRef.current = debugVisible;
   }, [debugVisible]);
+
+  useEffect(() => {
+    zoomRef.current = zoom;
+    rendererRef.current?.setZoom(zoom);
+  }, [zoom]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -66,6 +74,7 @@ export function PixiGameCanvas({ game, debugVisible, onStats, onDebugStats }: Pi
       const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
       dprRef.current = dpr;
       await pixiRenderer.init(host, rect.width, rect.height, dpr);
+      pixiRenderer.setZoom(zoomRef.current);
 
       if (disposed || !pixiRenderer.app) {
         pixiRenderer.destroy();
@@ -123,20 +132,28 @@ export function PixiGameCanvas({ game, debugVisible, onStats, onDebugStats }: Pi
     };
   }, [game]);
 
+  const toWorldPoint = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      const point = getLocalPoint(event);
+      return rendererRef.current?.screenToWorld(point.x, point.y) ?? point;
+    },
+    [],
+  );
+
   const handlePointerDown = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
       pointerDownRef.current = true;
       event.currentTarget.setPointerCapture(event.pointerId);
-      const point = getLocalPoint(event);
+      const point = toWorldPoint(event);
       game.setPointer(point.x, point.y);
       onStats(game.getStats());
     },
-    [game, onStats],
+    [game, onStats, toWorldPoint],
   );
 
   const handlePointerMove = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
-      const point = getLocalPoint(event);
+      const point = toWorldPoint(event);
 
       if (pointerDownRef.current) {
         game.setPointer(point.x, point.y);
@@ -147,7 +164,7 @@ export function PixiGameCanvas({ game, debugVisible, onStats, onDebugStats }: Pi
         game.setPreview(point.x, point.y);
       }
     },
-    [game],
+    [game, toWorldPoint],
   );
 
   const clearPointer = useCallback((event?: React.PointerEvent<HTMLDivElement>) => {
@@ -157,6 +174,19 @@ export function PixiGameCanvas({ game, debugVisible, onStats, onDebugStats }: Pi
     }
     game.clearPointer();
   }, [game]);
+
+  const handleWheel = useCallback(
+    (event: React.WheelEvent<HTMLDivElement>) => {
+      if (!onZoomChange) {
+        return;
+      }
+
+      event.preventDefault();
+      const nextZoom = Math.min(1.8, Math.max(0.75, zoom + (event.deltaY < 0 ? 0.1 : -0.1)));
+      onZoomChange(Number(nextZoom.toFixed(2)));
+    },
+    [onZoomChange, zoom],
+  );
 
   return (
     <div
@@ -168,6 +198,7 @@ export function PixiGameCanvas({ game, debugVisible, onStats, onDebugStats }: Pi
       onPointerLeave={clearPointer}
       onPointerMove={handlePointerMove}
       onPointerUp={clearPointer}
+      onWheel={handleWheel}
       role="application"
     />
   );

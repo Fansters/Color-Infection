@@ -16,6 +16,8 @@ import {
   Sparkles,
   Timer,
   Zap,
+  ZoomIn,
+  ZoomOut,
   type LucideIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -186,7 +188,7 @@ function DockButton({ active = false, countdown, disabled, icon: Icon, label, on
   return (
     <button
       aria-label={tooltip}
-      className="group relative flex h-[92px] w-[110px] flex-col items-center justify-center gap-2 rounded-[24px] border border-white/14 bg-[linear-gradient(180deg,rgba(120,144,170,0.3),rgba(58,76,99,0.28))] text-white/92 shadow-[0_18px_45px_rgba(7,14,28,0.28)] backdrop-blur-xl transition duration-200 hover:scale-[1.03] hover:border-white/26 hover:bg-[linear-gradient(180deg,rgba(132,160,190,0.42),rgba(68,88,114,0.38))] hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-[#57c8ff]/55 disabled:cursor-not-allowed disabled:opacity-45 md:opacity-80"
+      className="group relative flex h-16 w-[74px] flex-col items-center justify-center gap-1 rounded-[18px] border border-white/14 bg-[linear-gradient(180deg,rgba(32,58,76,0.46),rgba(12,30,44,0.34))] text-white/92 shadow-[0_18px_45px_rgba(0,7,18,0.34)] backdrop-blur-xl transition duration-200 hover:scale-[1.03] hover:border-white/26 hover:bg-[linear-gradient(180deg,rgba(54,87,110,0.52),rgba(20,43,61,0.42))] hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-[#57c8ff]/55 disabled:cursor-not-allowed disabled:opacity-45 md:opacity-86"
       disabled={disabled}
       onClick={onClick}
       type="button"
@@ -195,12 +197,12 @@ function DockButton({ active = false, countdown, disabled, icon: Icon, label, on
         {tooltip}
       </span>
       {countdown ? (
-        <span className="absolute right-3 top-3 rounded-full bg-white/14 px-2 py-0.5 text-[11px] font-semibold text-white/92">
+        <span className="absolute right-1.5 top-1.5 rounded-full bg-white/14 px-1.5 py-0.5 text-[9px] font-semibold text-white/92">
           {countdown}
         </span>
       ) : null}
-      <Icon className={`size-7 ${active ? "text-[#8ad8ff]" : "text-[#4fc3ff]"}`} strokeWidth={2.2} />
-      <span className="text-base font-medium">{label}</span>
+      <Icon className={`size-5 ${active ? "text-[#8ad8ff]" : "text-[#4fc3ff]"}`} strokeWidth={2.2} />
+      <span className="text-xs font-semibold">{label}</span>
     </button>
   );
 }
@@ -215,6 +217,7 @@ export default function GameCanvas() {
   const [debugDrawerOpen, setDebugDrawerOpen] = useState(false);
   const [debugPinned, setDebugPinned] = useState(false);
   const [debugStats, setDebugStats] = useState<GameDebugStats | null>(null);
+  const [arenaZoom, setArenaZoom] = useState(1);
 
   const syncStats = useCallback(() => {
     const currentGame = gameRef.current;
@@ -330,6 +333,10 @@ export default function GameCanvas() {
     syncStats();
   }, [syncStats]);
 
+  const changeArenaZoom = useCallback((nextZoom: number) => {
+    setArenaZoom(Math.min(1.8, Math.max(0.75, Number(nextZoom.toFixed(2)))));
+  }, []);
+
   const chooseUpgrade = useCallback(
     (choiceId: GameStats["upgradeChoices"][number]["id"]) => {
       gameRef.current?.chooseUpgrade(choiceId);
@@ -383,16 +390,18 @@ export default function GameCanvas() {
         : "text-white/62";
   const enemySummary =
     stats.enemyCount > 0
-      ? `Capture enemy base - Mini-bases ${stats.nodePlayerSuppliedCount}/${stats.nodePlayerCount}-${stats.nodeEnemySuppliedCount}/${stats.nodeEnemyCount} supplied - Your base danger ${playerBaseDangerPercent}%`
-      : "Capture the enemy base - use mini-bases to heal";
+      ? `Main objective - capture enemy base! Your base danger ${playerBaseDangerPercent}%`
+      : "Main objective - capture enemy base!";
 
   return (
-    <section className="relative min-h-svh w-full overflow-hidden bg-[#0b1624] text-white">
+    <section className="relative min-h-svh w-full overflow-hidden bg-[#050d14] text-white">
       <PixiGameCanvas
         debugVisible={debugVisible}
         game={game}
         onDebugStats={setDebugStats}
         onStats={setStats}
+        onZoomChange={changeArenaZoom}
+        zoom={arenaZoom}
       />
 
       {screen !== "playing" && (
@@ -530,20 +539,11 @@ export default function GameCanvas() {
         </div>
       )}
 
-      <div className="pointer-events-auto absolute inset-x-0 top-0 z-20 flex h-20 items-center gap-2 overflow-x-auto border-b border-white/10 bg-[linear-gradient(180deg,rgba(12,22,36,0.94),rgba(12,22,36,0.68))] px-2 text-white shadow-[0_18px_54px_rgba(2,8,18,0.28)] backdrop-blur-2xl [scrollbar-width:none] sm:px-3">
-        <div className="flex h-14 shrink-0 items-center gap-2 rounded-[14px] px-2">
-          <span className="grid size-8 place-items-center rounded-full bg-white/7 ring-1 ring-white/12">
-            <Sparkles className="size-4 text-[#57c8ff]" strokeWidth={1.9} />
-          </span>
-          <div className="whitespace-nowrap text-lg font-semibold tracking-[-0.02em]">
-            Color <span className="text-[#ff765f]">Infection</span>
-          </div>
-        </div>
-
-        <div className="flex h-14 shrink-0 items-center gap-1 rounded-[14px] border border-white/14 bg-white/[0.075] px-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-2xl">
+      <div className="pointer-events-auto absolute inset-x-0 top-0 z-20 flex h-20 items-center gap-2 overflow-x-auto border-b border-white/10 bg-[linear-gradient(180deg,rgba(5,14,22,0.96),rgba(8,19,29,0.78))] px-2 text-white shadow-[0_18px_54px_rgba(0,4,10,0.42)] backdrop-blur-2xl [scrollbar-width:none] sm:px-3">
+        <div className="flex h-11 shrink-0 items-center gap-1 rounded-[13px] border border-white/12 bg-white/[0.055] px-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.1)] backdrop-blur-2xl">
           <button
             aria-label="Return to home screen"
-            className="grid size-10 place-items-center rounded-[11px] text-white/72 transition hover:bg-white/10 hover:text-white focus:outline-none focus:ring-2 focus:ring-[#57c8ff]/45"
+            className="grid size-9 place-items-center rounded-[10px] text-white/72 transition hover:bg-white/10 hover:text-white focus:outline-none focus:ring-2 focus:ring-[#57c8ff]/45"
             onClick={openHome}
             title="Home"
             type="button"
@@ -552,7 +552,7 @@ export default function GameCanvas() {
           </button>
           <button
             aria-label="Open level select"
-            className="grid size-10 place-items-center rounded-[11px] text-white/72 transition hover:bg-white/10 hover:text-white focus:outline-none focus:ring-2 focus:ring-[#57c8ff]/45"
+            className="grid size-9 place-items-center rounded-[10px] text-white/72 transition hover:bg-white/10 hover:text-white focus:outline-none focus:ring-2 focus:ring-[#57c8ff]/45"
             onClick={openLevelSelect}
             title="Levels"
             type="button"
@@ -561,31 +561,13 @@ export default function GameCanvas() {
           </button>
         </div>
 
-        <div className="flex h-14 shrink-0 items-center overflow-hidden rounded-[14px] border border-white/14 bg-white/[0.075] shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-2xl">
-          <DesktopStatPill
-            icon={Shield}
-            label="Core"
-            tone="clean"
-            value={`L${stats.playerLevel}`}
-          />
-          <div className="h-5 w-px bg-white/12" />
-          <DesktopStatPill
-            icon={Flag}
-            label="Supplied"
-            tone="clean"
-            value={`${stats.nodePlayerSuppliedCount}/${Math.max(1, stats.nodePlayerCount)}`}
-          />
-          <div className="h-5 w-px bg-white/12" />
-          <DesktopStatPill icon={Timer} label="Time" tone="neutral" value={formatTime(stats.remainingSeconds)} />
-        </div>
-
-        <div className="flex h-14 min-w-[320px] flex-1 items-center gap-3 rounded-[14px] border border-white/14 bg-white/[0.075] px-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-2xl">
+        <div className="flex h-11 min-w-[220px] flex-1 items-center gap-2 rounded-[13px] border border-white/12 bg-white/[0.055] px-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.1)] backdrop-blur-2xl sm:min-w-[360px]">
           <span className="grid size-7 shrink-0 place-items-center rounded-full bg-white/8 text-white/80 ring-1 ring-white/10">
             <Activity className="size-3.5" strokeWidth={1.9} />
           </span>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-3">
-              <span className="whitespace-nowrap text-sm font-semibold text-white/92">Enemy base</span>
+              <span className="hidden whitespace-nowrap text-sm font-semibold text-white/92 sm:inline">Enemy base</span>
               <div className="h-2 min-w-[120px] flex-1 overflow-hidden rounded-full bg-white/12">
                 <div
                   className="h-full rounded-full bg-gradient-to-r from-[#57c8ff] to-[#8ff7d1] transition-[width] duration-300"
@@ -594,57 +576,11 @@ export default function GameCanvas() {
               </div>
               <span className="w-10 text-right text-base font-semibold text-[#57c8ff]">{enemyBaseCapturePercent}%</span>
             </div>
-            <div className="truncate text-center text-[11px] font-medium text-white/56">{enemySummary}</div>
+            <div className="truncate text-center text-[10px] font-semibold uppercase tracking-[0.08em] text-white/56">{enemySummary}</div>
           </div>
         </div>
 
-        <div className="flex h-14 shrink-0 items-center gap-1 rounded-[14px] border border-white/14 bg-white/[0.075] px-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-2xl">
-          <button
-            aria-label={shockwaveLabel}
-            className="relative grid size-8 place-items-center rounded-[10px] text-[#57c8ff] transition hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-[#57c8ff]/45 disabled:cursor-not-allowed disabled:opacity-42"
-            disabled={!stats.shockwaveReady || stats.paused || stats.status !== "playing"}
-            onClick={activateShockwave}
-            title={stats.shockwaveReady ? "Wave" : shockwaveLabel}
-            type="button"
-          >
-            <Zap className="size-4.5" strokeWidth={2.2} />
-            {!stats.shockwaveReady && (
-              <span className="absolute -right-1 -top-1 rounded-full bg-white/16 px-1 text-[9px] font-semibold text-white">
-                {Math.round(stats.shockwaveCharge)}
-              </span>
-            )}
-          </button>
-          <button
-            aria-label={shieldLabel}
-            className="relative grid size-8 place-items-center rounded-[10px] text-[#57c8ff] transition hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-[#57c8ff]/45 disabled:cursor-not-allowed disabled:opacity-42"
-            disabled={!stats.shieldReady || stats.paused || stats.status !== "playing"}
-            onClick={activateShield}
-            title={shieldLabel}
-            type="button"
-          >
-            <Shield className="size-4.5" strokeWidth={2.2} />
-            {(stats.shieldActive || (!stats.shieldReady && stats.level >= 3)) && (
-              <span className="absolute -right-1 -top-1 rounded-full bg-white/16 px-1 text-[9px] font-semibold text-white">
-                {stats.shieldActive ? Math.ceil(stats.shieldTimer) : Math.ceil(stats.shieldCooldownRemaining)}
-              </span>
-            )}
-          </button>
-          <button
-            aria-label={botLabel}
-            className="relative grid size-8 place-items-center rounded-[10px] text-[#8ff7d1] transition hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-[#57c8ff]/45 disabled:cursor-not-allowed disabled:opacity-42"
-            disabled={!stats.botReady || stats.paused || stats.status !== "playing"}
-            onClick={spawnFriendlyBot}
-            title={botLabel}
-            type="button"
-          >
-            <Bot className="size-4.5" strokeWidth={2.2} />
-            <span className="absolute -right-1 -top-1 rounded-full bg-white/16 px-1 text-[9px] font-semibold text-white">
-              {stats.botReady ? stats.friendlyBotCount : Math.ceil(stats.botCooldownRemaining)}
-            </span>
-          </button>
-        </div>
-
-        <div className="flex h-14 shrink-0 items-center gap-2 rounded-[14px] border border-white/14 bg-white/[0.075] px-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-2xl">
+        <div className="hidden h-11 shrink-0 items-center gap-2 rounded-[13px] border border-white/12 bg-white/[0.055] px-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.1)] backdrop-blur-2xl md:flex">
           <Shield className="size-4 text-[#dcd3ff]" strokeWidth={2} />
           <div className="leading-tight">
             <div className={`text-[10px] font-semibold uppercase tracking-[0.08em] ${recoveryTone}`}>
@@ -658,7 +594,7 @@ export default function GameCanvas() {
 
         <select
           aria-label="AI difficulty"
-          className="h-14 shrink-0 rounded-[14px] border border-white/14 bg-white/[0.075] px-2 text-[11px] font-semibold uppercase text-white outline-none shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-2xl transition focus:border-[#57c8ff]/60 focus:ring-2 focus:ring-[#57c8ff]/25"
+          className="h-11 shrink-0 rounded-[13px] border border-white/12 bg-white/[0.055] px-2 text-[10px] font-semibold uppercase text-white outline-none shadow-[inset_0_1px_0_rgba(255,255,255,0.1)] backdrop-blur-2xl transition focus:border-[#57c8ff]/60 focus:ring-2 focus:ring-[#57c8ff]/25 sm:px-3 sm:text-[11px]"
           onChange={(event) => changeDifficulty(event.target.value as AIDifficulty)}
           value={stats.aiDifficulty}
         >
@@ -669,23 +605,73 @@ export default function GameCanvas() {
 
         <button
           aria-label="Reset game"
-          className="inline-flex h-14 shrink-0 items-center gap-2 rounded-[14px] border border-white/14 bg-white/[0.075] px-3 text-sm font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-2xl transition hover:bg-white/12 focus:outline-none focus:ring-2 focus:ring-[#57c8ff]/45"
+          className="inline-flex h-11 shrink-0 items-center gap-2 rounded-[13px] border border-white/12 bg-white/[0.055] px-3 text-xs font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.1)] backdrop-blur-2xl transition hover:bg-white/12 focus:outline-none focus:ring-2 focus:ring-[#57c8ff]/45"
           onClick={resetGame}
           type="button"
         >
           <RotateCcw className="size-4" strokeWidth={2} />
-          Reset
+          <span className="hidden sm:inline">Reset</span>
         </button>
 
         <button
           aria-label={pauseLabel}
           aria-pressed={stats.paused}
-          className="grid h-14 w-12 shrink-0 place-items-center rounded-[14px] border border-white/14 bg-white/[0.075] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-2xl transition hover:bg-white/12 focus:outline-none focus:ring-2 focus:ring-[#57c8ff]/45"
+          className="grid h-11 w-11 shrink-0 place-items-center rounded-[13px] border border-white/12 bg-white/[0.055] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.1)] backdrop-blur-2xl transition hover:bg-white/12 focus:outline-none focus:ring-2 focus:ring-[#57c8ff]/45"
           onClick={togglePause}
           title={stats.paused ? "Resume" : "Pause"}
           type="button"
         >
           <PauseIcon className="size-5" strokeWidth={2.2} />
+        </button>
+      </div>
+
+      <div className="pointer-events-auto absolute bottom-4 left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-[22px] border border-white/14 bg-[linear-gradient(180deg,rgba(11,26,38,0.76),rgba(6,17,27,0.68))] p-2 text-white shadow-[0_22px_80px_rgba(0,6,14,0.42),inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-2xl">
+        <DockButton
+          active={stats.shockwaveReady}
+          countdown={stats.shockwaveReady ? undefined : `${Math.round(stats.shockwaveCharge)}`}
+          disabled={!stats.shockwaveReady || stats.paused || stats.status !== "playing"}
+          icon={Zap}
+          label="Wave"
+          onClick={activateShockwave}
+          tooltip={stats.shockwaveReady ? "Wave: reveal and push enemies" : shockwaveLabel}
+        />
+        <DockButton
+          active={stats.shieldActive || stats.shieldReady}
+          countdown={stats.shieldActive ? `${Math.ceil(stats.shieldTimer)}` : !stats.shieldReady && stats.level >= 3 ? `${Math.ceil(stats.shieldCooldownRemaining)}` : undefined}
+          disabled={!stats.shieldReady || stats.paused || stats.status !== "playing"}
+          icon={Shield}
+          label="Shield"
+          onClick={activateShield}
+          tooltip={stats.shieldActive ? "Shield: 50% clash damage reduction" : shieldLabel}
+        />
+        <DockButton
+          active={stats.botReady}
+          countdown={stats.botReady ? `${stats.friendlyBotCount}` : `${Math.ceil(stats.botCooldownRemaining)}`}
+          disabled={!stats.botReady || stats.paused || stats.status !== "playing"}
+          icon={Bot}
+          label="Bot"
+          onClick={spawnFriendlyBot}
+          tooltip={botLabel}
+        />
+      </div>
+
+      <div className="pointer-events-auto absolute bottom-4 right-4 z-20 flex items-center gap-1 rounded-[18px] border border-white/12 bg-[linear-gradient(180deg,rgba(11,26,38,0.72),rgba(6,17,27,0.62))] p-1.5 text-white shadow-[0_18px_54px_rgba(0,6,14,0.36),inset_0_1px_0_rgba(255,255,255,0.1)] backdrop-blur-2xl">
+        <button
+          aria-label="Zoom out"
+          className="grid size-9 place-items-center rounded-[13px] text-white/72 transition hover:bg-white/10 hover:text-white focus:outline-none focus:ring-2 focus:ring-[#57c8ff]/45"
+          onClick={() => changeArenaZoom(arenaZoom - 0.1)}
+          type="button"
+        >
+          <ZoomOut className="size-4.5" strokeWidth={2.1} />
+        </button>
+        <span className="min-w-10 text-center text-[11px] font-semibold text-white/64">{Math.round(arenaZoom * 100)}%</span>
+        <button
+          aria-label="Zoom in"
+          className="grid size-9 place-items-center rounded-[13px] text-white/72 transition hover:bg-white/10 hover:text-white focus:outline-none focus:ring-2 focus:ring-[#57c8ff]/45"
+          onClick={() => changeArenaZoom(arenaZoom + 0.1)}
+          type="button"
+        >
+          <ZoomIn className="size-4.5" strokeWidth={2.1} />
         </button>
       </div>
 

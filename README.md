@@ -2,13 +2,13 @@
 
 Color Infection is a web-based 2D territorial puzzle prototype built with Next.js App Router, TypeScript, React, PixiJS, and Tailwind CSS.
 
-## Version 1.19
+## Version 1.20
 
-Version 1.19 is the Strategic Base AI and Support Bot pass. It builds on V1.18 with chainable desktop-safe mini-base placement, repaired supplied mini-base healing, a support bot deploy ability, pulse-timed enemy reveal, and a more utility-driven enemy objective brain.
+Version 1.20 is the Dark Arena HUD and Zoom pass. It builds on V1.19 with fixed enemy respawn timing, removed enemy spawn invulnerability, player recovery isolation from support-bot fights, arena zoom controls, a darker unified game surface, simplified in-match navigation, bottom ability controls, and clearer 3D core/readability visuals.
 
-The main V1.19 direction: the arena should play more like a deliberate capture-the-base strategy game. Mini-bases now form usable supply chains, support bots can help contest the map without capturing main bases, and enemy bots evaluate capture, defense, recovery, interception, and pressure goals instead of only drifting toward obvious targets.
+The main V1.20 direction: the arena should feel cleaner, darker, and easier to read while keeping the base-capture strategy intact. The top HUD now focuses on navigation, objective progress, recovery, difficulty, reset, and pause; abilities live as small in-arena controls near the bottom.
 
-V1.18 combat fixes, V1.17 start flow, V1.16 strategic bases, V1.15 fog removal, V1.13 base capture, V1.12 recovery feedback, V1.10 recovery, V1.09 radius readability, V1.08 dark glass UI, V1.07 hold-and-drag movement, V1.06 core combat, and V1.05 pulse/spike optimizations remain in place.
+V1.19 support bots and strategic AI, V1.18 combat fixes, V1.17 start flow, V1.16 strategic bases, V1.15 fog removal, V1.13 base capture, V1.12 recovery feedback, V1.10 recovery, V1.09 radius readability, V1.08 dark glass UI, V1.07 hold-and-drag movement, V1.06 core combat, and V1.05 pulse/spike optimizations remain in place.
 
 The architecture is intentionally split:
 
@@ -48,6 +48,8 @@ The architecture is intentionally split:
 - Core death is a setback, not an instant match end:
   - defeated enemy cores respawn at their bases after a short delay,
   - the player respawns at the player base with temporary invulnerability.
+- Defeated enemy cores now respawn after a fixed 9 seconds.
+- Enemy cores no longer receive spawn invulnerability when entering or re-entering the arena.
 - Blue and red bases pulse softly, restore nearby friendly shields, and act as respawn anchors.
 - Each side has one main base. Capturing the enemy main base wins the match; losing the player main base loses the match.
 - In multi-enemy levels, every enemy core spawns and respawns from the same enemy main base in the opposite corner.
@@ -68,15 +70,23 @@ The architecture is intentionally split:
 - Contextual hints explain key conditions such as capturing mini-bases, isolated bases, base threats, recovery supply, upgrades, and the enemy main-base goal.
 - Pause stops timer, movement, base capture, enemy decisions, nodes, pulses, particles, and core animation.
 - Reset restarts the current level.
+- Arena zoom controls are available in the lower-right corner, and mouse wheel zoom is supported on desktop.
 
 ### Dark Glass Interface
 
-- The UI now uses an 80px dark glass navbar at the top of the screen.
-- The top bar contains the logo, Home, Levels, core level, supplied mini-base count, timer, enemy-base capture progress, wave, shield, recovery state, AI difficulty, reset, and pause.
+- The UI uses an 80px dark glass navbar at the top of the screen.
+- The arena and navbar now share a deeper blue-black sci-fi background treatment with a subtle dotted texture.
+- The top bar is simplified to Home, Levels, enemy-base capture progress, compact recovery, AI difficulty, reset, and pause.
+- The old in-match logo, timer, core-level pill, supplied mini-base pill, and top ability buttons have been removed from the visible navbar.
+- The enemy-base objective copy now reads as the main objective: capture the enemy base.
+- Wave, Shield, and Bot abilities now live in a small bottom-center in-arena dock.
+- Zoom controls live in a compact lower-right in-arena dock.
 - The top bar is non-playable space; the arena begins below it.
 - The arena now runs full-width and continues to the bottom edge of the viewport.
-- Previous bottom HUD controls, bottom ability dock, bottom reset, and bottom mobile stat circles are disabled in favor of the single top command surface.
-- The Pixi background/frame has been shifted to a darker atmospheric shell to better match the new UI direction.
+- Previous legacy bottom HUD/mobile stat circles remain disabled.
+- The Pixi background/frame has been shifted to a darker atmospheric shell to better match the new visual direction.
+- Player and enemy orb sprites now use a stronger 3D radial highlight/rim style.
+- Floating health/shield bars are larger, higher contrast, and include small shield/health glyphs for faster reading.
 - Influence visuals are intentionally subtle, while combat rings are clearer and match actual combat range.
 - The player core displays a small `LV n` title under the orb so progression is readable directly in the arena.
 
@@ -103,6 +113,7 @@ The architecture is intentionally split:
   - health uses green, amber, and red thresholds,
   - shield uses pale violet/silver,
   - dark translucent backplates keep bars readable over bases, effects, and the arena background.
+- Player recovery is isolated from support-bot combat. If support bots fight elsewhere, the player core can still regenerate normally when it is not personally fighting.
 - Player bars are always visible. Enemy bars appear only when enemies are visible through player proximity or temporary reveal.
 - Invulnerable or shielded cores display subtle ring/shell feedback.
 - Combat begins when visible combat rings touch, so the visual ring matches the actual combat radius.

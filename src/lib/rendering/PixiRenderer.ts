@@ -157,6 +157,12 @@ export class PixiRenderer {
   };
   private lastSyncHealthBarsMs = 0;
   private lastSyncFogHazeMs = 0;
+  private zoom = 1;
+  private camera = {
+    scale: 1,
+    x: 0,
+    y: 0,
+  };
 
   async init(host: HTMLElement, width: number, height: number, dpr: number) {
     const app = new Application();
@@ -216,6 +222,18 @@ export class PixiRenderer {
     this.resetFogTexture();
   }
 
+  setZoom(zoom: number) {
+    this.zoom = clamp(zoom, 0.75, 1.8);
+  }
+
+  screenToWorld(x: number, y: number) {
+    const scale = Math.max(0.001, this.camera.scale);
+    return {
+      x: (x - this.camera.x) / scale,
+      y: (y - this.camera.y) / scale,
+    };
+  }
+
   sync(state: GameRenderState): PixiRenderMetrics {
     if (!this.layers || !this.textures || !this.app) {
       return this.emptyMetrics();
@@ -237,6 +255,7 @@ export class PixiRenderer {
 
     this.drawBackground(state);
     this.drawArenaMask(state.arena);
+    this.updateCamera(state);
     this.disableFogLayers();
     this.drawBases(state);
     this.lastDotSyncMetrics = this.syncDots(state);
@@ -275,6 +294,36 @@ export class PixiRenderer {
       syncFogHazeMs: this.lastSyncFogHazeMs,
       fogVisualsEnabled: state.fogVisualsEnabled,
     };
+  }
+
+  private updateCamera(state: GameRenderState) {
+    if (!this.layers) {
+      return;
+    }
+
+    const zoom = clamp(this.zoom, 0.75, 1.8);
+    const focusX = state.player.active && !state.player.isRespawning ? state.player.x : state.width / 2;
+    const focusY = state.player.active && !state.player.isRespawning ? state.player.y : state.height / 2;
+    let x = state.width * 0.5 - focusX * zoom;
+    let y = state.height * 0.5 - focusY * zoom;
+    const scaledArenaWidth = state.arena.width * zoom;
+    const scaledArenaHeight = state.arena.height * zoom;
+
+    if (scaledArenaWidth > state.width) {
+      x = clamp(x, state.width - state.arena.right * zoom, -state.arena.x * zoom);
+    } else {
+      x = (state.width - scaledArenaWidth) * 0.5 - state.arena.x * zoom;
+    }
+
+    if (scaledArenaHeight > state.height) {
+      y = clamp(y, state.height - state.arena.bottom * zoom, -state.arena.y * zoom);
+    } else {
+      y = (state.height - scaledArenaHeight) * 0.5 - state.arena.y * zoom;
+    }
+
+    this.camera = { scale: zoom, x, y };
+    this.layers.arenaLayer.scale.set(zoom);
+    this.layers.arenaLayer.position.set(x, y);
   }
 
   destroy() {
@@ -479,16 +528,23 @@ export class PixiRenderer {
     this.backgroundKey = key;
     this.backgroundTexture = this.createCanvasTexture(state.width, state.height, (ctx) => {
       const gradient = ctx.createLinearGradient(0, 0, state.width, state.height);
-      gradient.addColorStop(0, "#07111f");
-      gradient.addColorStop(0.38, "#132238");
-      gradient.addColorStop(1, "#070d18");
+      gradient.addColorStop(0, "#050d14");
+      gradient.addColorStop(0.44, "#0a1823");
+      gradient.addColorStop(1, "#040a10");
       ctx.fillStyle = gradient;
       ctx.fillRect(0, 0, state.width, state.height);
 
-      const arenaGradient = ctx.createLinearGradient(state.arena.x, state.arena.y, state.arena.right, state.arena.bottom);
-      arenaGradient.addColorStop(0, "rgba(225,242,250,0.9)");
-      arenaGradient.addColorStop(0.55, "rgba(236,241,245,0.88)");
-      arenaGradient.addColorStop(1, "rgba(218,228,237,0.86)");
+      const arenaGradient = ctx.createRadialGradient(
+        state.arena.x + state.arena.width * 0.5,
+        state.arena.y + state.arena.height * 0.45,
+        Math.min(state.arena.width, state.arena.height) * 0.08,
+        state.arena.x + state.arena.width * 0.5,
+        state.arena.y + state.arena.height * 0.45,
+        Math.max(state.arena.width, state.arena.height) * 0.7,
+      );
+      arenaGradient.addColorStop(0, "rgba(20,40,54,0.96)");
+      arenaGradient.addColorStop(0.52, "rgba(9,25,37,0.96)");
+      arenaGradient.addColorStop(1, "rgba(3,9,15,0.98)");
       this.drawRoundedCanvasPath(ctx, state.arena.x, state.arena.y, state.arena.width, state.arena.height, state.arena.radius);
       ctx.fillStyle = arenaGradient;
       ctx.fill();
@@ -498,8 +554,8 @@ export class PixiRenderer {
       for (let y = 8; y < 64; y += 16) {
         for (let x = 8; x < 64; x += 16) {
           ctx.beginPath();
-          ctx.arc(x, y, 1.1, 0, Math.PI * 2);
-          ctx.fillStyle = "rgba(8,18,32,0.14)";
+          ctx.arc(x, y, 1.35, 0, Math.PI * 2);
+          ctx.fillStyle = "rgba(110, 145, 168, 0.13)";
           ctx.fill();
         }
       }
@@ -514,16 +570,16 @@ export class PixiRenderer {
         state.height * 0.48,
         Math.max(state.width, state.height) * 0.68,
       );
-      radial.addColorStop(0, "rgba(7,13,24,0)");
-      radial.addColorStop(0.72, "rgba(7,13,24,0.08)");
-      radial.addColorStop(1, "rgba(7,13,24,0.62)");
+      radial.addColorStop(0, "rgba(2,8,14,0)");
+      radial.addColorStop(0.62, "rgba(2,8,14,0.18)");
+      radial.addColorStop(1, "rgba(0,3,8,0.82)");
       ctx.fillStyle = radial;
       ctx.fillRect(0, 0, state.width, state.height);
     });
 
     this.backgroundSprite = new Sprite(this.backgroundTexture);
     this.gridSprite = new TilingSprite({ texture: this.gridTexture, width: state.width, height: state.height });
-    this.gridSprite.alpha = 0.48;
+    this.gridSprite.alpha = 0.68;
     this.vignetteSprite = new Sprite(this.vignetteTexture);
     this.layers.backgroundLayer.addChildAt(this.backgroundSprite, 0);
     this.layers.backgroundLayer.addChildAt(this.gridSprite, 1);
@@ -1013,25 +1069,56 @@ export class PixiRenderer {
     const shield = previous.shield + (targetShield - previous.shield) * 0.2;
     this.coreBarState.set(agent.id, { health, shield });
 
-    const width = clamp(agent.bodyRadius * 3.6, 48, 72);
-    const x = agent.x - width / 2;
-    const y = agent.y - agent.bodyRadius - (alwaysVisible ? 28 : 24);
+    const width = clamp(agent.bodyRadius * 4.25, 64, 94);
+    const iconSize = 12;
+    const x = agent.x - width / 2 + iconSize + 5;
+    const y = agent.y - agent.bodyRadius - (alwaysVisible ? 38 : 33);
     const healthColor = health > 0.6 ? 0x4ade80 : health > 0.3 ? 0xfbbf24 : 0xff5f5f;
     const shieldAlpha = shield > 0.03 ? 0.86 + agent.shieldFlashTimer * 0.12 : 0.24;
+    const plateX = x - iconSize - 9;
+    const plateWidth = width + iconSize + 14;
 
-    this.coreHealthBarGraphics.roundRect(x - 3, y - 4, width + 6, 13, 5).fill({
-      color: 0x050914,
-      alpha: alwaysVisible ? 0.62 : 0.52,
+    this.coreHealthBarGraphics.roundRect(plateX, y - 7, plateWidth, 23, 8).fill({
+      color: 0x030811,
+      alpha: alwaysVisible ? 0.78 : 0.64,
     });
-    this.coreHealthBarGraphics.roundRect(x, y, width, 4, 2).fill({ color: 0x172033, alpha: 0.84 });
-    this.coreHealthBarGraphics.roundRect(x, y, Math.max(1, width * health), 4, 2).fill({
-      color: healthColor,
-      alpha: 0.98,
+    this.coreHealthBarGraphics.roundRect(plateX, y - 7, plateWidth, 23, 8).stroke({
+      color: 0xffffff,
+      alpha: alwaysVisible ? 0.18 : 0.1,
+      width: 1,
     });
-    this.coreHealthBarGraphics.roundRect(x, y + 6, width, 3, 1.5).fill({ color: 0x1e293b, alpha: 0.78 });
-    this.coreHealthBarGraphics.roundRect(x, y + 6, Math.max(1, width * shield), 3, 1.5).fill({
+
+    const shieldIconX = x - iconSize - 3;
+    const shieldIconY = y - 2;
+    this.coreHealthBarGraphics
+      .moveTo(shieldIconX + iconSize * 0.5, shieldIconY - 4)
+      .lineTo(shieldIconX + iconSize, shieldIconY)
+      .lineTo(shieldIconX + iconSize * 0.82, shieldIconY + iconSize * 0.64)
+      .lineTo(shieldIconX + iconSize * 0.5, shieldIconY + iconSize)
+      .lineTo(shieldIconX + iconSize * 0.18, shieldIconY + iconSize * 0.64)
+      .lineTo(shieldIconX, shieldIconY)
+      .closePath()
+      .stroke({ color: 0xe9ddff, alpha: 0.92, width: 1.8 });
+
+    const heartX = x - iconSize - 3;
+    const heartY = y + 8.5;
+    this.coreHealthBarGraphics
+      .moveTo(heartX + iconSize * 0.5, heartY + iconSize * 0.82)
+      .bezierCurveTo(heartX - 1, heartY + iconSize * 0.38, heartX + 1, heartY, heartX + iconSize * 0.36, heartY + 1)
+      .bezierCurveTo(heartX + iconSize * 0.48, heartY + 1, heartX + iconSize * 0.5, heartY + iconSize * 0.18, heartX + iconSize * 0.5, heartY + iconSize * 0.18)
+      .bezierCurveTo(heartX + iconSize * 0.5, heartY + iconSize * 0.18, heartX + iconSize * 0.54, heartY + 1, heartX + iconSize * 0.68, heartY + 1)
+      .bezierCurveTo(heartX + iconSize, heartY, heartX + iconSize + 1, heartY + iconSize * 0.38, heartX + iconSize * 0.5, heartY + iconSize * 0.82)
+      .fill({ color: healthColor, alpha: 0.96 });
+
+    this.coreHealthBarGraphics.roundRect(x, y - 2, width, 6, 3).fill({ color: 0x142033, alpha: 0.94 });
+    this.coreHealthBarGraphics.roundRect(x, y - 2, Math.max(1, width * shield), 6, 3).fill({
       color: 0xe9ddff,
       alpha: shieldAlpha,
+    });
+    this.coreHealthBarGraphics.roundRect(x, y + 8, width, 7, 3.5).fill({ color: 0x162235, alpha: 0.94 });
+    this.coreHealthBarGraphics.roundRect(x, y + 8, Math.max(1, width * health), 7, 3.5).fill({
+      color: healthColor,
+      alpha: 0.98,
     });
     this.drawCoreLevelLabel(agent, alwaysVisible);
   }
