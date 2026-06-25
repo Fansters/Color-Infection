@@ -15,6 +15,7 @@ import {
 } from "@/lib/game/Game";
 import { palette, rgba, type Rgb } from "@/lib/game/colors";
 import { clamp, smoothstep } from "@/lib/game/math";
+import { createArenaBackgroundTextures } from "./pixiArenaBackground";
 import { GraphicsPool, SpritePool } from "./pixiEffects";
 import { countPixiChildren, createPixiLayers, type PixiLayers } from "./pixiLayers";
 import { createPixiTextures, destroyPixiTextures, type DotTextureKey, type PixiTextures } from "./pixiTextures";
@@ -511,6 +512,41 @@ export class PixiRenderer {
     this.arenaFrameGraphics.stroke({ color: 0xffffff, alpha: 0.11, width: 1 });
     drawArenaPath(this.arenaFrameGraphics, arena);
     this.arenaFrameGraphics.stroke({ color: 0x86a9c7, alpha: 0.16, width: 1 });
+    this.drawNearbyBoundaryHighlight(state);
+  }
+
+  private drawNearbyBoundaryHighlight(state: GameRenderState) {
+    const arena = state.arena;
+    const player = state.player;
+    const edgeDistances = [
+      { edge: "left", value: Math.abs(player.x - arena.x) },
+      { edge: "right", value: Math.abs(arena.right - player.x) },
+      { edge: "top", value: Math.abs(player.y - arena.y) },
+      { edge: "bottom", value: Math.abs(arena.bottom - player.y) },
+    ].sort((a, b) => a.value - b.value);
+    const nearest = edgeDistances[0];
+
+    if (!nearest || nearest.value > 92) {
+      return;
+    }
+
+    const alpha = clamp(1 - nearest.value / 92, 0, 1) * 0.58;
+    const span = 96;
+    const x1 = clamp(player.x - span, arena.x + arena.radius, arena.right - arena.radius);
+    const x2 = clamp(player.x + span, arena.x + arena.radius, arena.right - arena.radius);
+    const y1 = clamp(player.y - span, arena.y + arena.radius, arena.bottom - arena.radius);
+    const y2 = clamp(player.y + span, arena.y + arena.radius, arena.bottom - arena.radius);
+
+    if (nearest.edge === "top") {
+      this.arenaFrameGraphics.moveTo(x1, arena.y + 2).lineTo(x2, arena.y + 2);
+    } else if (nearest.edge === "bottom") {
+      this.arenaFrameGraphics.moveTo(x1, arena.bottom - 2).lineTo(x2, arena.bottom - 2);
+    } else if (nearest.edge === "left") {
+      this.arenaFrameGraphics.moveTo(arena.x + 2, y1).lineTo(arena.x + 2, y2);
+    } else {
+      this.arenaFrameGraphics.moveTo(arena.right - 2, y1).lineTo(arena.right - 2, y2);
+    }
+    this.arenaFrameGraphics.stroke({ color: 0x77e4ff, alpha, width: 2.4 });
   }
 
   private ensureBackgroundTextures(state: GameRenderState) {
@@ -526,56 +562,14 @@ export class PixiRenderer {
 
     this.resetBackgroundTextures();
     this.backgroundKey = key;
-    this.backgroundTexture = this.createCanvasTexture(state.width, state.height, (ctx) => {
-      const gradient = ctx.createLinearGradient(0, 0, state.width, state.height);
-      gradient.addColorStop(0, "#050d14");
-      gradient.addColorStop(0.44, "#0a1823");
-      gradient.addColorStop(1, "#040a10");
-      ctx.fillStyle = gradient;
-      ctx.fillRect(0, 0, state.width, state.height);
-
-      const arenaGradient = ctx.createRadialGradient(
-        state.arena.x + state.arena.width * 0.5,
-        state.arena.y + state.arena.height * 0.45,
-        Math.min(state.arena.width, state.arena.height) * 0.08,
-        state.arena.x + state.arena.width * 0.5,
-        state.arena.y + state.arena.height * 0.45,
-        Math.max(state.arena.width, state.arena.height) * 0.7,
-      );
-      arenaGradient.addColorStop(0, "rgba(20,40,54,0.96)");
-      arenaGradient.addColorStop(0.52, "rgba(9,25,37,0.96)");
-      arenaGradient.addColorStop(1, "rgba(3,9,15,0.98)");
-      this.drawRoundedCanvasPath(ctx, state.arena.x, state.arena.y, state.arena.width, state.arena.height, state.arena.radius);
-      ctx.fillStyle = arenaGradient;
-      ctx.fill();
+    const textures = createArenaBackgroundTextures({
+      arena: state.arena,
+      height: state.height,
+      width: state.width,
     });
-    this.gridTexture = this.createCanvasTexture(64, 64, (ctx) => {
-      ctx.clearRect(0, 0, 64, 64);
-      for (let y = 8; y < 64; y += 16) {
-        for (let x = 8; x < 64; x += 16) {
-          ctx.beginPath();
-          ctx.arc(x, y, 1.35, 0, Math.PI * 2);
-          ctx.fillStyle = "rgba(110, 145, 168, 0.13)";
-          ctx.fill();
-        }
-      }
-    });
-    this.vignetteTexture = this.createCanvasTexture(state.width, state.height, (ctx) => {
-      ctx.clearRect(0, 0, state.width, state.height);
-      const radial = ctx.createRadialGradient(
-        state.width * 0.52,
-        state.height * 0.48,
-        Math.min(state.width, state.height) * 0.28,
-        state.width * 0.52,
-        state.height * 0.48,
-        Math.max(state.width, state.height) * 0.68,
-      );
-      radial.addColorStop(0, "rgba(2,8,14,0)");
-      radial.addColorStop(0.62, "rgba(2,8,14,0.18)");
-      radial.addColorStop(1, "rgba(0,3,8,0.82)");
-      ctx.fillStyle = radial;
-      ctx.fillRect(0, 0, state.width, state.height);
-    });
+    this.backgroundTexture = textures.background;
+    this.gridTexture = textures.grid;
+    this.vignetteTexture = textures.vignette;
 
     this.backgroundSprite = new Sprite(this.backgroundTexture);
     this.gridSprite = new TilingSprite({ texture: this.gridTexture, width: state.width, height: state.height });
@@ -584,42 +578,6 @@ export class PixiRenderer {
     this.layers.backgroundLayer.addChildAt(this.backgroundSprite, 0);
     this.layers.backgroundLayer.addChildAt(this.gridSprite, 1);
     this.layers.backgroundLayer.addChildAt(this.vignetteSprite, 2);
-  }
-
-  private createCanvasTexture(width: number, height: number, draw: (ctx: CanvasRenderingContext2D) => void) {
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.max(1, Math.ceil(width));
-    canvas.height = Math.max(1, Math.ceil(height));
-    const context = canvas.getContext("2d");
-
-    if (context) {
-      draw(context);
-    }
-
-    return Texture.from(canvas);
-  }
-
-  private drawRoundedCanvasPath(
-    ctx: CanvasRenderingContext2D,
-    x: number,
-    y: number,
-    width: number,
-    height: number,
-    radius: number,
-  ) {
-    const right = x + width;
-    const bottom = y + height;
-    ctx.beginPath();
-    ctx.moveTo(x + radius, y);
-    ctx.lineTo(right - radius, y);
-    ctx.quadraticCurveTo(right, y, right, y + radius);
-    ctx.lineTo(right, bottom - radius);
-    ctx.quadraticCurveTo(right, bottom, right - radius, bottom);
-    ctx.lineTo(x + radius, bottom);
-    ctx.quadraticCurveTo(x, bottom, x, bottom - radius);
-    ctx.lineTo(x, y + radius);
-    ctx.quadraticCurveTo(x, y, x + radius, y);
-    ctx.closePath();
   }
 
   private resetBackgroundTextures() {
@@ -783,22 +741,31 @@ export class PixiRenderer {
       );
       const pulse = 1 + Math.sin(state.destination.pulse * 7) * 0.12;
       const alpha = clamp(0.2 + targetDistance / 420, 0.2, 0.62);
+      const targetColor = state.destination.blocked ? 0xff9b4a : colorToHex(palette.player);
+      const hotColor = state.destination.blocked ? 0xff5f4f : colorToHex(palette.playerHot);
 
       this.destinationGraphics
         .moveTo(state.player.x, state.player.y)
         .lineTo(state.destination.x, state.destination.y)
-        .stroke({ color: colorToHex(palette.player), alpha: alpha * 0.42, width: 1.4 });
+        .stroke({ color: targetColor, alpha: alpha * 0.42, width: 1.4 });
       this.destinationGraphics.circle(state.destination.x, state.destination.y, 12 * pulse).stroke({
-        color: colorToHex(palette.playerHot),
+        color: hotColor,
         alpha,
         width: 2,
       });
+      if (state.destination.blocked) {
+        this.destinationGraphics.circle(state.destination.x, state.destination.y, 18 * pulse).stroke({
+          color: 0xffd18a,
+          alpha: 0.5,
+          width: 1.1,
+        });
+      }
     }
 
     if (state.preview.active) {
       this.destinationGraphics.circle(state.preview.x, state.preview.y, 10).stroke({
-        color: colorToHex(palette.player),
-        alpha: 0.22,
+        color: state.preview.blocked ? 0xff9b4a : colorToHex(palette.player),
+        alpha: state.preview.blocked ? 0.42 : 0.22,
         width: 1,
       });
     }
@@ -900,13 +867,13 @@ export class PixiRenderer {
         continue;
       }
 
-      this.drawSoftField(enemy, "enemy", state);
+      this.drawSoftField(enemy, "enemy");
       this.drawEnemyMark(enemy, state);
     }
 
-    this.drawSoftField(state.player, "player", state);
+    this.drawSoftField(state.player, "player");
     for (const bot of state.friendlyBots) {
-      this.drawSoftField(bot, "player", state);
+      this.drawSoftField(bot, "player");
     }
     const barsStarted = typeof performance !== "undefined" ? performance.now() : 0;
     this.drawCoreHealthBars(state);
@@ -1070,7 +1037,7 @@ export class PixiRenderer {
     this.coreBarState.set(agent.id, { health, shield });
 
     const width = clamp(agent.bodyRadius * 4.25, 64, 94);
-    const iconSize = 12;
+    const iconSize = 9;
     const x = agent.x - width / 2 + iconSize + 5;
     const y = agent.y - agent.bodyRadius - (alwaysVisible ? 38 : 33);
     const healthColor = health > 0.6 ? 0x4ade80 : health > 0.3 ? 0xfbbf24 : 0xff5f5f;
@@ -1098,7 +1065,7 @@ export class PixiRenderer {
       .lineTo(shieldIconX + iconSize * 0.18, shieldIconY + iconSize * 0.64)
       .lineTo(shieldIconX, shieldIconY)
       .closePath()
-      .stroke({ color: 0xe9ddff, alpha: 0.92, width: 1.8 });
+      .stroke({ color: 0xe9ddff, alpha: 0.92, width: 1.35 });
 
     const heartX = x - iconSize - 3;
     const heartY = y + 8.5;
@@ -1108,7 +1075,7 @@ export class PixiRenderer {
       .bezierCurveTo(heartX + iconSize * 0.48, heartY + 1, heartX + iconSize * 0.5, heartY + iconSize * 0.18, heartX + iconSize * 0.5, heartY + iconSize * 0.18)
       .bezierCurveTo(heartX + iconSize * 0.5, heartY + iconSize * 0.18, heartX + iconSize * 0.54, heartY + 1, heartX + iconSize * 0.68, heartY + 1)
       .bezierCurveTo(heartX + iconSize, heartY, heartX + iconSize + 1, heartY + iconSize * 0.38, heartX + iconSize * 0.5, heartY + iconSize * 0.82)
-      .fill({ color: healthColor, alpha: 0.96 });
+      .fill({ color: 0xff5f5f, alpha: 0.96 });
 
     this.coreHealthBarGraphics.roundRect(x, y - 2, width, 6, 3).fill({ color: 0x142033, alpha: 0.94 });
     this.coreHealthBarGraphics.roundRect(x, y - 2, Math.max(1, width * shield), 6, 3).fill({
@@ -1153,7 +1120,7 @@ export class PixiRenderer {
     label.visible = true;
   }
 
-  private drawSoftField(agent: Agent, kind: AgentKind, state: GameRenderState) {
+  private drawSoftField(agent: Agent, kind: AgentKind) {
     if (agent.isRespawning || !agent.active) {
       return;
     }
@@ -1193,73 +1160,12 @@ export class PixiRenderer {
       width: agent.slowTimer > 0 ? 2.4 : 1.4,
     });
 
-    this.drawCoreStatusRing(agent, kind, edge, color);
-
-    if ((kind === "player" && state.shieldTimer > 0) || agent.shieldFlashTimer > 0.01) {
-      const pulse = 1 + Math.sin(state.time * 7) * 0.045 + agent.shieldFlashTimer * 0.08;
-      this.coreAuraGraphics.circle(agent.x, agent.y, (agent.combatRadius + 8) * pulse).stroke({
-        color: colorToHex(palette.playerHot),
-        alpha: kind === "player" && state.shieldTimer > 0 ? 0.56 + agent.shieldFlashTimer * 0.18 : 0.3 + agent.shieldFlashTimer * 0.35,
-        width: kind === "player" && state.shieldTimer > 0 ? 3.2 : 2.4,
-      });
-    }
-
     if (agent.hitFlashTimer > 0.01) {
       this.coreAuraGraphics.circle(agent.x, agent.y, agent.bodyRadius + 5 + agent.hitFlashTimer * 5).fill({
         color: 0xffffff,
         alpha: agent.hitFlashTimer * 0.22,
       });
     }
-  }
-
-  private drawCoreStatusRing(agent: Agent, kind: AgentKind, edge: number, hot: number) {
-    const healthRatio = clamp(agent.health / Math.max(1, agent.maxHealth), 0, 1);
-    const shieldRatio = clamp(agent.shield / Math.max(1, agent.maxShield), 0, 1);
-    const healthPulse = agent.healthPulseTimer > 0 ? Math.sin(agent.healthPulseTimer * 24) * 2.2 : 0;
-    const baseRadius = agent.bodyRadius + 12 - Math.max(0, healthPulse);
-    this.coreAuraGraphics.circle(agent.x, agent.y, baseRadius).stroke({ color: 0xffffff, alpha: 0.32 + agent.hitFlashTimer * 0.12, width: 2.2 });
-    this.drawArcRing(this.coreAuraGraphics, agent.x, agent.y, baseRadius, -Math.PI / 2, healthRatio, {
-      color: edge,
-      alpha: 0.78 + agent.hitFlashTimer * 0.14,
-      width: 2.4 + agent.healthPulseTimer * 0.8,
-    });
-
-    if (shieldRatio > 0.03) {
-      this.drawArcRing(this.coreAuraGraphics, agent.x, agent.y, baseRadius + 5, -Math.PI / 2, shieldRatio, {
-        color: hot,
-        alpha: (kind === "player" ? 0.58 : 0.46) + agent.shieldFlashTimer * 0.22,
-        width: 2.6 + agent.shieldFlashTimer * 1.1,
-      });
-    }
-
-    if (agent.invulnerableTimer > 0) {
-      const pulse = 1 + Math.sin((this.app?.ticker.lastTime ?? 0) * 0.01 + agent.id) * 0.06;
-      this.coreAuraGraphics.circle(agent.x, agent.y, (baseRadius + 10) * pulse).stroke({
-        color: 0xffffff,
-        alpha: 0.48,
-        width: 1.5,
-      });
-    }
-  }
-
-  private drawArcRing(
-    graphic: Graphics,
-    x: number,
-    y: number,
-    radius: number,
-    start: number,
-    ratio: number,
-    style: { color: number; alpha: number; width: number },
-  ) {
-    const clamped = clamp(ratio, 0, 1);
-
-    if (clamped <= 0.001) {
-      return;
-    }
-
-    const end = start + Math.PI * 2 * clamped;
-    graphic.moveTo(x + Math.cos(start) * radius, y + Math.sin(start) * radius).arc(x, y, radius, start, end);
-    graphic.stroke(style);
   }
 
   private drawEnemyMark(enemy: Agent, state: GameRenderState) {

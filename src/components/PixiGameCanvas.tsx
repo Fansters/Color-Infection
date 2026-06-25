@@ -29,6 +29,8 @@ export function PixiGameCanvas({ game, debugVisible, zoom, onStats, onDebugStats
   const debugVisibleRef = useRef(debugVisible);
   const pointerDownRef = useRef(false);
   const zoomRef = useRef(zoom);
+  const activePointersRef = useRef(new Map<number, { x: number; y: number }>());
+  const pinchRef = useRef<{ distance: number; zoom: number } | null>(null);
   const callbacksRef = useRef({ onStats, onDebugStats });
 
   useEffect(() => {
@@ -142,6 +144,16 @@ export function PixiGameCanvas({ game, debugVisible, zoom, onStats, onDebugStats
 
   const handlePointerDown = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
+      activePointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (activePointersRef.current.size === 2) {
+        const points = [...activePointersRef.current.values()];
+        pinchRef.current = {
+          distance: Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y),
+          zoom: zoomRef.current,
+        };
+        pointerDownRef.current = false;
+        return;
+      }
       pointerDownRef.current = true;
       event.currentTarget.setPointerCapture(event.pointerId);
       const point = toWorldPoint(event);
@@ -153,6 +165,18 @@ export function PixiGameCanvas({ game, debugVisible, zoom, onStats, onDebugStats
 
   const handlePointerMove = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
+      if (activePointersRef.current.has(event.pointerId)) {
+        activePointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      }
+
+      if (activePointersRef.current.size >= 2 && pinchRef.current && onZoomChange) {
+        const points = [...activePointersRef.current.values()];
+        const distance = Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
+        const nextZoom = Math.min(1.8, Math.max(0.75, pinchRef.current.zoom * (distance / Math.max(1, pinchRef.current.distance))));
+        onZoomChange(Number(nextZoom.toFixed(2)));
+        return;
+      }
+
       const point = toWorldPoint(event);
 
       if (pointerDownRef.current) {
@@ -164,10 +188,18 @@ export function PixiGameCanvas({ game, debugVisible, zoom, onStats, onDebugStats
         game.setPreview(point.x, point.y);
       }
     },
-    [game, toWorldPoint],
+    [game, onZoomChange, toWorldPoint],
   );
 
   const clearPointer = useCallback((event?: React.PointerEvent<HTMLDivElement>) => {
+    if (event) {
+      activePointersRef.current.delete(event.pointerId);
+    } else {
+      activePointersRef.current.clear();
+    }
+    if (activePointersRef.current.size < 2) {
+      pinchRef.current = null;
+    }
     pointerDownRef.current = false;
     if (event?.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);

@@ -2,13 +2,13 @@
 
 Color Infection is a web-based 2D territorial puzzle prototype built with Next.js App Router, TypeScript, React, PixiJS, and Tailwind CSS.
 
-## Version 1.20
+## Version 1.21
 
-Version 1.20 is the Dark Arena HUD and Zoom pass. It builds on V1.19 with fixed enemy respawn timing, removed enemy spawn invulnerability, player recovery isolation from support-bot fights, arena zoom controls, a darker unified game surface, simplified in-match navigation, bottom ability controls, and clearer 3D core/readability visuals.
+Version 1.21 is the Arena Boundary and Mini-Base Bonus pass. It builds on V1.20 with cleaner orb readability, compact level-up choices, a richer static arena boundary, strategic mini-base placement, max-health bonuses from captured mini-bases, dismissible hints, improved ability tooltips, and wheel/pinch-only zoom.
 
-The main V1.20 direction: the arena should feel cleaner, darker, and easier to read while keeping the base-capture strategy intact. The top HUD now focuses on navigation, objective progress, recovery, difficulty, reset, and pause; abilities live as small in-arena controls near the bottom.
+The main V1.21 direction: the arena should be more readable and strategic without adding rendering cost. Mini-bases are now valuable health objectives, the playable bounds are visually obvious, and upgrade/hint overlays interrupt the fight less.
 
-V1.19 support bots and strategic AI, V1.18 combat fixes, V1.17 start flow, V1.16 strategic bases, V1.15 fog removal, V1.13 base capture, V1.12 recovery feedback, V1.10 recovery, V1.09 radius readability, V1.08 dark glass UI, V1.07 hold-and-drag movement, V1.06 core combat, and V1.05 pulse/spike optimizations remain in place.
+V1.20 dark HUD and zoom, V1.19 support bots and strategic AI, V1.18 combat fixes, V1.17 start flow, V1.16 strategic bases, V1.15 fog removal, V1.13 base capture, V1.12 recovery feedback, V1.10 recovery, V1.09 radius readability, V1.08 dark glass UI, V1.07 hold-and-drag movement, V1.06 core combat, and V1.05 pulse/spike optimizations remain in place.
 
 The architecture is intentionally split:
 
@@ -57,20 +57,23 @@ The architecture is intentionally split:
 - If one team core is inside a capture zone, capture moves toward that team.
 - If both teams are inside, capture is contested and progress slows/bleeds instead of freely completing.
 - If no opposing core is inside, capture progress stabilizes back toward the current owner.
-- Mini-bases are placed strategically across the arena and can be captured, recaptured, and used as healing stations only when supplied.
-- Each map now uses six mini-bases: three chained outward from the player main base and three chained outward from the enemy main base.
-- Mini-base spacing is constrained so captured bases can connect on both desktop and mobile instead of spawning uselessly out of supply range.
-- Supplied mini-bases must connect back to a friendly main base through nearby friendly mini-bases.
-- Isolated mini-bases are dimmer, flicker subtly, and do not provide the fast mini-base recovery bonus.
+- Mini-bases are placed strategically across the arena and can be captured, recaptured, and used as healing stations by their owner.
+- Each map uses six mini-bases placed as strategic objectives across the arena rather than as forced supply chains.
+- Mini-base connection logic is no longer required for healing.
+- Each captured mini-base adds +10 max health to the owning team.
+- If the enemy recaptures a player-owned mini-base, the player loses that +10 max-health bonus.
 - Capturing a mini-base awards XP.
 - Friendly main bases restore 20 health per second after recovery delay.
-- Friendly mini-bases restore 6 health per second after recovery delay.
-- Level-ups can trigger compact upgrade choices: Clash Power, Shield Cell, Drive, or Field Lens.
+- Friendly captured mini-bases restore 6 health per second after recovery delay.
+- Level-ups can trigger compact upgrade choices: Clash Power, Shield Cell, or Drive.
 - If the player ignores upgrades and levels multiple times, each level-up is queued as a pending upgrade pick.
 - Contextual hints explain key conditions such as capturing mini-bases, isolated bases, base threats, recovery supply, upgrades, and the enemy main-base goal.
+- Hints are dismissible with a close button.
+- The `Choose an upgrade` hint no longer sticks after the player chooses an upgrade.
 - Pause stops timer, movement, base capture, enemy decisions, nodes, pulses, particles, and core animation.
 - Reset restarts the current level.
-- Arena zoom controls are available in the lower-right corner, and mouse wheel zoom is supported on desktop.
+- Arena zoom uses mouse wheel on desktop and pinch gestures on touch devices.
+- Visible zoom buttons were removed to keep the arena cleaner.
 
 ### Dark Glass Interface
 
@@ -80,13 +83,16 @@ The architecture is intentionally split:
 - The old in-match logo, timer, core-level pill, supplied mini-base pill, and top ability buttons have been removed from the visible navbar.
 - The enemy-base objective copy now reads as the main objective: capture the enemy base.
 - Wave, Shield, and Bot abilities now live in a small bottom-center in-arena dock.
-- Zoom controls live in a compact lower-right in-arena dock.
 - The top bar is non-playable space; the arena begins below it.
 - The arena now runs full-width and continues to the bottom edge of the viewport.
 - Previous legacy bottom HUD/mobile stat circles remain disabled.
 - The Pixi background/frame has been shifted to a darker atmospheric shell to better match the new visual direction.
 - Player and enemy orb sprites now use a stronger 3D radial highlight/rim style.
 - Floating health/shield bars are larger, higher contrast, and include small shield/health glyphs for faster reading.
+- Health/shield arc rings around orb bodies have been removed because the bars now carry that information.
+- Bar icons are smaller, and the health icon is red for better recognition.
+- Ability tooltips now use a wider padded tooltip so labels do not collapse into one word per line.
+- The level-up UI is now a compact dark command bar with three choices: Clash Power, Shield Cell, and Drive.
 - Influence visuals are intentionally subtle, while combat rings are clearer and match actual combat range.
 - The player core displays a small `LV n` title under the orb so progression is readable directly in the arena.
 
@@ -108,7 +114,7 @@ The architecture is intentionally split:
 - Level 3 unlocks the shield ability.
 - Level 4 improves shockwave utility.
 - Higher core levels continue increasing health, shields, combat power, mass, and radius, with slight high-level speed tradeoffs.
-- Health and shield rings render around player and enemy cores in Pixi.
+- Health and shield arc rings around player and enemy cores have been removed from the orb body.
 - Floating high-contrast health/shield bars are now the primary combat readability layer:
   - health uses green, amber, and red thresholds,
   - shield uses pale violet/silver,
@@ -122,7 +128,7 @@ The architecture is intentionally split:
 - After combat ends, normal recovery waits 3 seconds; base recovery can start after 0.75 seconds.
 - Recovery supply rules:
   - neutral arena: slow shield-only recovery,
-  - supplied mini-base: medium health and shield regeneration,
+  - captured mini-base: medium health and shield regeneration,
   - own main base: fast health and shield regeneration.
 - Shield regeneration is prioritized before health regeneration.
 - Level-ups no longer fully heal the player; they restore a modest 20% max health and 50% max shield after max-stat increases.
@@ -135,7 +141,19 @@ The architecture is intentionally split:
 - Press `E` or use the shield UI button to activate the player shield after it unlocks on level 3.
 - Shield duration: 6 seconds.
 - Shield cooldown: 12 seconds.
-- The shield adds temporary protection and a cyan shell/ring around the player core.
+- The shield adds temporary protection and is reflected in the floating shield bar.
+
+### Arena Boundary
+
+- The playable arena now has a clear rounded containment field.
+- Outside the arena is darker and quieter; inside keeps the subtle dotted game surface.
+- The boundary uses a thin cyan/white energy rim with static corner accents and scanline/tick details.
+- Arena background and border textures are generated once on resize and reused by Pixi.
+- Dragging outside the playable bounds clamps the destination to the nearest valid point.
+- Out-of-bounds destination feedback turns amber and shows a small blocked-boundary ring at the valid point.
+- Cores remain clamped to arena bounds.
+- When a core presses against the boundary, a subtle pooled ripple/particle effect plays on the border.
+- The nearby edge segment brightens softly when the player is close.
 
 ### Support Bot Ability
 

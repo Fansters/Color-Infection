@@ -2,8 +2,10 @@
 
 import {
   Activity,
+  ArrowUp,
   Bot,
   Bug,
+  ChevronsRight,
   ChevronLeft,
   Flag,
   Home,
@@ -15,9 +17,8 @@ import {
   Shield,
   Sparkles,
   Timer,
+  X,
   Zap,
-  ZoomIn,
-  ZoomOut,
   type LucideIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -193,7 +194,7 @@ function DockButton({ active = false, countdown, disabled, icon: Icon, label, on
       onClick={onClick}
       type="button"
     >
-      <span className="pointer-events-none absolute -top-10 rounded-full border border-white/14 bg-slate-950/80 px-3 py-1 text-[11px] font-medium text-white opacity-0 shadow-lg transition group-hover:-translate-y-0.5 group-hover:opacity-100 group-focus-visible:opacity-100">
+      <span className="pointer-events-none absolute bottom-full left-1/2 mb-2 w-max min-w-[150px] max-w-[240px] -translate-x-1/2 whitespace-normal rounded-[12px] border border-white/14 bg-slate-950/88 px-4 py-2 text-center text-[11px] font-medium leading-4 text-white opacity-0 shadow-lg transition group-hover:-translate-y-0.5 group-hover:opacity-100 group-focus-visible:opacity-100">
         {tooltip}
       </span>
       {countdown ? (
@@ -344,6 +345,11 @@ export default function GameCanvas() {
     },
     [syncStats],
   );
+
+  const dismissHint = useCallback(() => {
+    gameRef.current?.dismissHint();
+    syncStats();
+  }, [syncStats]);
 
   const changeDifficulty = useCallback(
     (difficulty: AIDifficulty) => {
@@ -512,30 +518,54 @@ export default function GameCanvas() {
       )}
 
       {stats.hint && (
-        <div className="pointer-events-none absolute left-1/2 top-16 z-30 w-[min(92vw,520px)] -translate-x-1/2 rounded-[16px] border border-white/14 bg-[linear-gradient(180deg,rgba(22,33,50,0.78),rgba(12,20,34,0.68))] px-4 py-2 text-center text-sm font-medium text-white/86 shadow-[0_18px_48px_rgba(2,8,18,0.28)] backdrop-blur-2xl">
-          {stats.hint}
+        <div className="pointer-events-auto absolute left-1/2 top-16 z-30 flex w-[min(92vw,520px)] -translate-x-1/2 items-center gap-3 rounded-[16px] border border-white/14 bg-[linear-gradient(180deg,rgba(22,33,50,0.78),rgba(12,20,34,0.68))] px-4 py-2 text-sm font-medium text-white/86 shadow-[0_18px_48px_rgba(2,8,18,0.28)] backdrop-blur-2xl">
+          <span className="min-w-0 flex-1 text-center">{stats.hint}</span>
+          <button
+            aria-label="Dismiss hint"
+            className="grid size-7 shrink-0 place-items-center rounded-full text-white/58 transition hover:bg-white/10 hover:text-white focus:outline-none focus:ring-2 focus:ring-[#57c8ff]/45"
+            onClick={dismissHint}
+            type="button"
+          >
+            <X className="size-3.5" strokeWidth={2.2} />
+          </button>
         </div>
       )}
 
       {stats.upgradePending && (
-        <div className="pointer-events-auto absolute left-1/2 top-28 z-30 grid w-[min(94vw,680px)] -translate-x-1/2 gap-2 rounded-[20px] border border-[#57c8ff]/22 bg-[linear-gradient(180deg,rgba(22,38,58,0.86),rgba(13,22,36,0.78))] p-3 shadow-[0_22px_70px_rgba(2,8,18,0.34)] backdrop-blur-2xl sm:grid-cols-4">
-          <div className="sm:col-span-4 flex items-center justify-between gap-3 px-1 pb-1">
-            <div className="text-sm font-semibold text-white">Choose upgrade</div>
-            <div className="rounded-full border border-white/12 bg-white/[0.08] px-2.5 py-1 text-[11px] font-semibold text-white/62">
+        <div className="pointer-events-auto absolute left-1/2 top-24 z-30 w-[min(94vw,720px)] -translate-x-1/2 rounded-[18px] border border-[#57c8ff]/22 bg-[linear-gradient(180deg,rgba(9,25,38,0.94),rgba(5,13,22,0.9))] p-2.5 shadow-[0_22px_70px_rgba(2,8,18,0.42),inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-2xl sm:p-3">
+          <div className="mb-2 flex items-center justify-between gap-3 border-b border-white/10 px-2 pb-2">
+            <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.22em] text-white/86">
+              <ArrowUp className="size-3.5 text-[#57c8ff]" strokeWidth={2.4} />
+              Level up
+            </div>
+            <div className="rounded-full border border-white/12 bg-white/[0.08] px-2.5 py-1 text-[10px] font-semibold text-white/62">
               {stats.pendingUpgradeCount} pending
             </div>
           </div>
-          {stats.upgradeChoices.map((choice) => (
-            <button
-              className="rounded-[14px] border border-white/12 bg-white/[0.075] px-3 py-2 text-left transition hover:border-[#57c8ff]/45 hover:bg-white/[0.12] focus:outline-none focus:ring-2 focus:ring-[#57c8ff]/45"
-              key={choice.id}
-              onClick={() => chooseUpgrade(choice.id)}
-              type="button"
-            >
-              <div className="text-sm font-semibold text-white">{choice.label}</div>
-              <div className="mt-1 text-[11px] leading-4 text-white/58">{choice.description}</div>
-            </button>
-          ))}
+          <div className="grid grid-cols-3 gap-2">
+            {stats.upgradeChoices.map((choice) => {
+              const UpgradeIcon = choice.id === "speed" ? ChevronsRight : choice.id === "shield" ? Shield : Sparkles;
+
+              return (
+                <button
+                  className="group flex min-h-16 items-center gap-2 rounded-[14px] border border-white/12 bg-white/[0.06] px-2.5 py-2 text-left transition hover:border-[#57c8ff]/56 hover:bg-[#57c8ff]/12 focus:outline-none focus:ring-2 focus:ring-[#57c8ff]/45 sm:min-h-20 sm:gap-3 sm:px-4"
+                  key={choice.id}
+                  onClick={() => chooseUpgrade(choice.id)}
+                  type="button"
+                >
+                  <span className="grid size-9 shrink-0 place-items-center rounded-[12px] border border-[#57c8ff]/26 bg-[#071827] text-[#57c8ff] shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] sm:size-11">
+                    <UpgradeIcon className="size-4.5 sm:size-5" strokeWidth={2.25} />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block truncate text-xs font-bold text-white sm:text-base">{choice.label}</span>
+                    <span className="mt-0.5 block text-[10px] font-semibold leading-3 text-[#9fd8ec]/82 sm:text-xs sm:leading-4">
+                      {choice.description}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
 
@@ -653,26 +683,6 @@ export default function GameCanvas() {
           onClick={spawnFriendlyBot}
           tooltip={botLabel}
         />
-      </div>
-
-      <div className="pointer-events-auto absolute bottom-4 right-4 z-20 flex items-center gap-1 rounded-[18px] border border-white/12 bg-[linear-gradient(180deg,rgba(11,26,38,0.72),rgba(6,17,27,0.62))] p-1.5 text-white shadow-[0_18px_54px_rgba(0,6,14,0.36),inset_0_1px_0_rgba(255,255,255,0.1)] backdrop-blur-2xl">
-        <button
-          aria-label="Zoom out"
-          className="grid size-9 place-items-center rounded-[13px] text-white/72 transition hover:bg-white/10 hover:text-white focus:outline-none focus:ring-2 focus:ring-[#57c8ff]/45"
-          onClick={() => changeArenaZoom(arenaZoom - 0.1)}
-          type="button"
-        >
-          <ZoomOut className="size-4.5" strokeWidth={2.1} />
-        </button>
-        <span className="min-w-10 text-center text-[11px] font-semibold text-white/64">{Math.round(arenaZoom * 100)}%</span>
-        <button
-          aria-label="Zoom in"
-          className="grid size-9 place-items-center rounded-[13px] text-white/72 transition hover:bg-white/10 hover:text-white focus:outline-none focus:ring-2 focus:ring-[#57c8ff]/45"
-          onClick={() => changeArenaZoom(arenaZoom + 0.1)}
-          type="button"
-        >
-          <ZoomIn className="size-4.5" strokeWidth={2.1} />
-        </button>
       </div>
 
       <div className="hidden">

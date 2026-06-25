@@ -16,7 +16,7 @@ export type CombatState = "idle" | "contact" | "clash" | "overpower" | "break";
 export type ParticleKind = AgentKind | "clashPlayer" | "clashEnemy" | "clashEven";
 export type RecoveryState = "combat" | "recoveryDelay" | "regenOwnTerritory" | "regenBase" | "noSupply";
 export type TerritorySupply = "own" | "enemy" | "neutral" | "base" | "miniBase";
-export type UpgradeChoiceId = "power" | "shield" | "speed" | "radius";
+export type UpgradeChoiceId = "power" | "shield" | "speed";
 export type BotRole = "capturer" | "defender" | "hunter" | "interceptor" | "support";
 export type AIGoalType =
   | "captureNeutralBase"
@@ -528,8 +528,8 @@ export type GameRenderState = {
   pulses: ActivePulse[];
   contestedZones: ContestedZone[];
   particles: Particle[];
-  destination: { active: boolean; x: number; y: number; pulse: number };
-  preview: { active: boolean; x: number; y: number };
+  destination: { active: boolean; blocked: boolean; x: number; y: number; pulse: number };
+  preview: { active: boolean; blocked: boolean; x: number; y: number };
   shieldTimer: number;
   enemyRevealTimer: number;
   debugVisible: boolean;
@@ -957,12 +957,14 @@ export class Game {
   private enemyField = createField();
   private destination = {
     active: false,
+    blocked: false,
     x: 0,
     y: 0,
     pulse: 0,
   };
   private preview = {
     active: false,
+    blocked: false,
     x: 0,
     y: 0,
   };
@@ -1004,6 +1006,7 @@ export class Game {
   private maxFrameMsLast5s = 0;
   private time = 0;
   private collisionCooldown = 0;
+  private boundaryRippleCooldown = 0;
   private fogRevision = 0;
   private fogFrameCounter = 0;
   private playerVisibleDotIds: number[] = [];
@@ -1018,6 +1021,7 @@ export class Game {
   private aiDifficulty: AIDifficulty = "medium";
   private fogVisualsEnabled = false;
   private hintText: string | null = null;
+  private hintKey: string | null = null;
   private hintCooldown = 0;
   private shownHints = new Set<string>();
   private pendingUpgradeChoices: UpgradeChoice[] = [];
@@ -1150,6 +1154,7 @@ export class Game {
     this.destination.active = false;
     this.preview.active = false;
     this.hintText = null;
+    this.hintKey = null;
     this.hintCooldown = 0;
     this.shownHints.clear();
     this.pendingUpgradeChoices = [];
@@ -1249,8 +1254,6 @@ export class Game {
       this.playerUpgradeBonuses.shield += 12;
     } else if (choice.id === "speed") {
       this.playerUpgradeBonuses.speed *= 1.08;
-    } else if (choice.id === "radius") {
-      this.playerUpgradeBonuses.radius *= 1.08;
     }
 
     this.pendingUpgradeCount = Math.max(0, this.pendingUpgradeCount - 1);
@@ -1260,6 +1263,11 @@ export class Game {
     this.applyCoreLevelStats(this.player);
     this.player.health = Math.max(this.player.health, previousHealth);
     this.player.shield = Math.min(this.player.maxShield, Math.max(this.player.shield, previousShield + (choice.id === "shield" ? 12 : 0)));
+    if (this.hintKey === "choose-upgrade") {
+      this.hintText = null;
+      this.hintKey = null;
+      this.hintCooldown = 0;
+    }
     this.showHint("upgrade-applied", `${choice.label} installed.`, false);
     this.addRipple(this.player.x, this.player.y, "player", this.player.radius + 108);
     return true;
@@ -1305,6 +1313,7 @@ export class Game {
 
     const target = this.findOpenPoint(x, y, this.player.collisionRadius + 10);
     this.destination.active = true;
+    this.destination.blocked = !this.isInsideArenaBounds(x, y, this.player.collisionRadius + 10);
     this.destination.x = target.x;
     this.destination.y = target.y;
     this.destination.pulse = 0;
@@ -1320,12 +1329,14 @@ export class Game {
 
     const target = this.findOpenPoint(x, y, this.player.collisionRadius + 10);
     this.preview.active = true;
+    this.preview.blocked = !this.isInsideArenaBounds(x, y, this.player.collisionRadius + 10);
     this.preview.x = target.x;
     this.preview.y = target.y;
   }
 
   clearPointer() {
     this.preview.active = false;
+    this.preview.blocked = false;
   }
 
   togglePause() {
@@ -1381,6 +1392,7 @@ export class Game {
       this.elapsedSeconds += safeDt;
       this.destination.pulse += safeDt;
       this.collisionCooldown = Math.max(0, this.collisionCooldown - safeDt);
+      this.boundaryRippleCooldown = Math.max(0, this.boundaryRippleCooldown - safeDt);
       this.updateCoreTimers(safeDt);
       this.updateBases(safeDt);
       this.updateGates(safeDt);
@@ -1867,7 +1879,7 @@ export class Game {
       agent.influenceRadius = agent.baseInfluenceRadius * (1 + 0.05 * levelOffset);
       agent.visionRadius = agent.baseVisionRadius * (1 + 0.035 * levelOffset);
       agent.fieldRadius = agent.influenceRadius;
-      agent.maxHealth = 100 + levelOffset * 16;
+      agent.maxHealth = 100 + levelOffset * 16 + this.getMiniBaseHealthBonus(agent.kind);
       agent.maxShield = 20 + levelOffset * 3.5;
       agent.mass = 1.1 + levelOffset * 0.18;
       agent.power = 20 + levelOffset * 3.5;
@@ -1883,7 +1895,7 @@ export class Game {
       agent.influenceRadius = agent.baseInfluenceRadius * (1 + 0.05 * levelOffset);
       agent.visionRadius = agent.baseVisionRadius * (1 + 0.03 * levelOffset);
       agent.fieldRadius = agent.influenceRadius;
-      agent.maxHealth = 100 + levelOffset * 16;
+      agent.maxHealth = 100 + levelOffset * 16 + this.getMiniBaseHealthBonus(agent.kind);
       agent.maxShield = settings.shield + levelOffset * 3.5;
       agent.mass = settings.mass * (1 + levelOffset * 0.1);
       agent.power = 20 + levelOffset * 3.5;
@@ -1928,10 +1940,13 @@ export class Game {
         { id: "power", label: "Clash Power", description: "+7 core combat power" },
         { id: "shield", label: "Shield Cell", description: "+12 max shield" },
         { id: "speed", label: "Drive", description: "+8% movement speed" },
-        { id: "radius", label: "Field Lens", description: "+8% combat and heal radius" },
       ];
     }
     this.showHint("choose-upgrade", "Choose an upgrade.", false);
+  }
+
+  private getMiniBaseHealthBonus(team: AgentKind) {
+    return this.nodes.filter((node) => node.owner === team).length * 10;
   }
 
   private getNextLevelXp(level: number) {
@@ -1993,33 +2008,17 @@ export class Game {
 
   private createNodes() {
     const radius = this.width < 720 ? 22 : 28;
-    const enemyBase = this.bases.find((base) => base.team === "enemy");
-    const playerBase = this.bases.find((base) => base.team === "player");
-    const center = {
-      x: (this.arena.x + this.arena.right) / 2,
-      y: (this.arena.y + this.arena.bottom) / 2,
-    };
-    const step = clamp(Math.min(this.arena.width, this.arena.height) * 0.24, 145, 235);
-    const makeChain = (base: { x: number; y: number }, sign: number) => {
-      const dx = center.x - base.x;
-      const dy = center.y - base.y;
-      const length = Math.max(1, Math.hypot(dx, dy));
-      const ux = dx / length;
-      const uy = dy / length;
-      const px = -uy;
-      const py = ux;
-
-      return [1, 2, 3].map((index) => {
-        const offset = (index === 2 ? -0.16 : 0.14) * step * sign;
-        return {
-          x: base.x + ux * step * index + px * offset,
-          y: base.y + uy * step * index + py * offset,
-        };
-      });
-    };
+    const left = this.arena.x;
+    const top = this.arena.y;
+    const width = this.arena.width;
+    const height = this.arena.height;
     const placements = [
-      ...(playerBase ? makeChain(playerBase, 1) : [{ x: center.x - step, y: center.y }]),
-      ...(enemyBase ? makeChain(enemyBase, -1) : [{ x: center.x + step, y: center.y }]),
+      { x: left + width * 0.16, y: top + height * 0.2 },
+      { x: left + width * 0.3, y: top + height * 0.68 },
+      { x: left + width * 0.47, y: top + height * 0.86 },
+      { x: left + width * 0.48, y: top + height * 0.17 },
+      { x: left + width * 0.72, y: top + height * 0.32 },
+      { x: left + width * 0.88, y: top + height * 0.86 },
     ];
 
     this.nodes = placements.map((placement, id) => ({
@@ -2428,10 +2427,6 @@ export class Game {
         continue;
       }
 
-      if (!node.supplied) {
-        continue;
-      }
-
       if (distance(agent.x, agent.y, node.x, node.y) <= node.radius + agent.bodyRadius + 58) {
         return "miniBase";
       }
@@ -2454,7 +2449,18 @@ export class Game {
     }
 
     this.hintText = text;
+    this.hintKey = key;
     this.hintCooldown = HINT_COOLDOWN_SECONDS;
+  }
+
+  dismissHint() {
+    if (this.hintKey) {
+      this.shownHints.add(this.hintKey);
+    }
+
+    this.hintText = null;
+    this.hintKey = null;
+    this.hintCooldown = 0;
   }
 
   private updateHints(dt: number) {
@@ -2462,6 +2468,7 @@ export class Game {
 
     if (this.hintCooldown <= 0) {
       this.hintText = null;
+      this.hintKey = null;
     }
 
     if (this.elapsedSeconds > 1.8) {
@@ -2470,10 +2477,6 @@ export class Game {
 
     if (this.elapsedSeconds > 7) {
       this.showHint("enemy-main-goal", "Capture the enemy main base to win.");
-    }
-
-    if (this.nodes.some((node) => node.owner === "player" && !node.supplied)) {
-      this.showHint("isolated-base", "This base is isolated. Connect it to your main base.");
     }
 
     const playerBaseThreat = this.bases.some(
@@ -2488,11 +2491,7 @@ export class Game {
       this.player.health < this.player.maxHealth * 0.55 &&
       (this.player.recoveryState === "noSupply" || this.player.recoveryState === "recoveryDelay")
     ) {
-      this.showHint("return-supply", "Return to a supplied base to recover.", false);
-    }
-
-    if (this.pendingUpgradeChoices.length > 0) {
-      this.showHint("choose-upgrade", "Choose an upgrade.", false);
+      this.showHint("return-supply", "Return to a captured base to recover.", false);
     }
   }
 
@@ -2805,9 +2804,11 @@ export class Game {
 
     const maxStep = agent.speed * terrainModifier * dt;
     const step = Math.min(targetDistance, maxStep);
+    const intendedX = agent.x + dirX * step;
+    const intendedY = agent.y + dirY * step;
     const next = this.clampToArena(
-      agent.x + dirX * step,
-      agent.y + dirY * step,
+      intendedX,
+      intendedY,
       agent.collisionRadius + 8,
     );
 
@@ -2815,6 +2816,14 @@ export class Game {
     agent.velocityY = (next.y - agent.y) / Math.max(dt, 0.001);
     agent.x = next.x;
     agent.y = next.y;
+    if (
+      this.boundaryRippleCooldown <= 0 &&
+      (Math.abs(next.x - intendedX) > 0.01 || Math.abs(next.y - intendedY) > 0.01)
+    ) {
+      this.boundaryRippleCooldown = 0.38;
+      this.addRipple(next.x, next.y, "collision", agent.bodyRadius + 32);
+      this.addParticle(next.x, next.y, agent.kind, 0.7);
+    }
     this.resolveAgentBlockers(agent);
   }
 
@@ -3557,14 +3566,23 @@ export class Game {
           node.captureProgress += (dt * captureRate) / NODE_CAPTURE_SECONDS;
 
           if (node.captureProgress >= 1) {
+            const previousOwner = node.owner;
             node.owner = capturer;
             node.captureProgress = 0;
             node.captureBy = null;
             node.pulseTimer = 0.35;
             supplyDirty = true;
+            if (previousOwner === "player" || capturer === "player") {
+              this.applyCoreLevelStats(this.player);
+            }
+            if (previousOwner === "enemy" || capturer === "enemy") {
+              for (const enemy of this.enemies) {
+                this.applyCoreLevelStats(enemy);
+              }
+            }
             if (capturer === "player") {
               this.grantPlayerXp(XP_NODE_CAPTURED);
-              this.showHint("mini-base-captured", "Mini-base captured. Stay supplied to heal here.", false);
+              this.showHint("mini-base-captured", "Mini-base captured. +10 max health and healing station online.", false);
             } else {
               for (const enemy of this.getActiveEnemies()) {
                 if (distance(enemy.x, enemy.y, node.x, node.y) < enemy.influenceRadius + node.radius + 20) {
@@ -3596,48 +3614,8 @@ export class Game {
 
   private updateBaseSupply() {
     for (const node of this.nodes) {
-      node.supplied = false;
+      node.supplied = node.owner !== "neutral";
       node.supplyParentId = null;
-    }
-
-    const teams: AgentKind[] = ["player", "enemy"];
-
-    for (const team of teams) {
-      const owned = this.nodes.filter((node) => node.owner === team);
-      const baseAnchors = this.bases.filter((base) => base.team === team);
-      let changed = true;
-
-      while (changed) {
-        changed = false;
-
-        for (const node of owned) {
-          if (node.supplied) {
-            continue;
-          }
-
-          const baseParent = baseAnchors.find((base) => distance(node.x, node.y, base.x, base.y) <= SUPPLY_LINK_RADIUS);
-
-          if (baseParent) {
-            node.supplied = true;
-            node.supplyParentId = baseParent.id;
-            changed = true;
-            continue;
-          }
-
-          const nodeParent = owned.find(
-            (candidate) =>
-              candidate.supplied &&
-              candidate.id !== node.id &&
-              distance(node.x, node.y, candidate.x, candidate.y) <= SUPPLY_LINK_RADIUS,
-          );
-
-          if (nodeParent) {
-            node.supplied = true;
-            node.supplyParentId = nodeParent.id;
-            changed = true;
-          }
-        }
-      }
     }
   }
 
@@ -4759,5 +4737,14 @@ export class Game {
       x: clamp(x, this.arena.x + padding, this.arena.right - padding),
       y: clamp(y, this.arena.y + padding, this.arena.bottom - padding),
     };
+  }
+
+  private isInsideArenaBounds(x: number, y: number, padding: number) {
+    return (
+      x >= this.arena.x + padding &&
+      x <= this.arena.right - padding &&
+      y >= this.arena.y + padding &&
+      y <= this.arena.bottom - padding
+    );
   }
 }
