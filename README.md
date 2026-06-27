@@ -2,13 +2,13 @@
 
 Color Infection is a web-based 2D territorial puzzle prototype built with Next.js App Router, TypeScript, React, PixiJS, and Tailwind CSS.
 
-## Version 1.22
+## Version 1.24
 
-Version 1.22 is the Upgrade Stability and Edge Camera pass. It builds on V1.21 with corrected additive upgrade math and a player-centered camera that can pan beyond arena edges while the orb itself stays clamped inside the playable bounds.
+Version 1.24 is the Pixel Border Theme pass. It builds on V1.23 with the first visual move toward a 2D pixel-art spooky arena: new border sprite assets are rendered in Pixi around the existing mathematical gameplay bounds.
 
-The main V1.22 direction: progression should feel powerful without runaway stat bugs, and the player should remain readable near every arena edge instead of disappearing under the fixed navbar.
+The main V1.24 direction: keep the proven base-capture gameplay intact while replacing generic sci-fi boundary cues with reusable themed art.
 
-V1.21 arena boundary and mini-base bonuses, V1.20 dark HUD and zoom, V1.19 support bots and strategic AI, V1.18 combat fixes, V1.17 start flow, V1.16 strategic bases, V1.15 fog removal, V1.13 base capture, V1.12 recovery feedback, V1.10 recovery, V1.09 radius readability, V1.08 dark glass UI, V1.07 hold-and-drag movement, V1.06 core combat, and V1.05 pulse/spike optimizations remain in place.
+V1.23 UI asset integration and combat clarity, V1.22 upgrade stability and edge camera, V1.21 arena boundary and mini-base bonuses, V1.20 dark HUD and zoom, V1.19 support bots and strategic AI, V1.18 combat fixes, V1.17 start flow, V1.16 strategic bases, V1.15 fog removal, V1.13 base capture, V1.12 recovery feedback, V1.10 recovery, V1.09 radius readability, V1.08 dark glass UI, V1.07 hold-and-drag movement, V1.06 core combat, and V1.05 pulse/spike optimizations remain in place.
 
 The architecture is intentionally split:
 
@@ -62,7 +62,8 @@ The architecture is intentionally split:
 - Mini-base connection logic is no longer required for healing.
 - Each captured mini-base adds +10 max health to the owning team.
 - If the enemy recaptures a player-owned mini-base, the player loses that +10 max-health bonus.
-- Capturing a mini-base awards XP.
+- Capturing a mini-base awards XP, now tuned to 50% of the previous gain so leveling is slower.
+- Combat/cleanup XP sources were also reduced by 50% to keep progression from snowballing too quickly.
 - Friendly main bases restore 20 health per second after recovery delay.
 - Friendly captured mini-bases restore 6 health per second after recovery delay.
 - Level-ups can trigger compact upgrade choices: Clash Power, Shield Cell, or Drive.
@@ -86,10 +87,16 @@ The architecture is intentionally split:
 - The old in-match logo, timer, core-level pill, supplied mini-base pill, and top ability buttons have been removed from the visible navbar.
 - The enemy-base objective copy now reads as the main objective: capture the enemy base.
 - Wave, Shield, and Bot abilities now live in a small bottom-center in-arena dock.
+- A standalone objective card now sits below the navbar in the top-left corner: `Main objective - capture enemy base!`
+- The old duplicate objective copy was removed from the enemy-base progress bar.
+- When the player is dead, a green pulsing `Respawning in n` countdown appears above the ability dock.
+- Generated PNG icon cutouts now replace many Lucide-only controls in the active HUD: Home, Levels, enemy target, regen, difficulty, reset, pause, objective, respawn, upgrades, and Wave/Shield/Bot abilities.
 - The top bar is non-playable space; the arena begins below it.
 - The arena now runs full-width and continues to the bottom edge of the viewport.
 - Previous legacy bottom HUD/mobile stat circles remain disabled.
 - The Pixi background/frame has been shifted to a darker atmospheric shell to better match the new visual direction.
+- The arena has started shifting toward a 2D old-school spooky pixel-art theme.
+- Pixel border sprites now render around the playable arena bounds as visual trim only; they do not change movement, collision, capture, or camera math.
 - Player and enemy orb sprites now use a stronger 3D radial highlight/rim style.
 - Floating health/shield bars are larger, higher contrast, and include small shield/health glyphs for faster reading.
 - Health/shield arc rings around orb bodies have been removed because the bars now carry that information.
@@ -123,6 +130,7 @@ The architecture is intentionally split:
   - shield uses pale violet/silver,
   - dark translucent backplates keep bars readable over bases, effects, and the arena background.
 - Player recovery is isolated from support-bot combat. If support bots fight elsewhere, the player core can still regenerate normally when it is not personally fighting.
+- Remote base capture, support-bot fights, distant pulses, and shockwave hits no longer mark the player as `COMBAT`; the player enters combat recovery lockout only from actual player-core engagement.
 - Player bars are always visible. Enemy bars appear only when enemies are visible through player proximity or temporary reveal.
 - Invulnerable or shielded cores display subtle ring/shell feedback.
 - Combat begins when visible combat rings touch, so the visual ring matches the actual combat radius.
@@ -151,6 +159,9 @@ The architecture is intentionally split:
 - The playable arena now has a clear rounded containment field.
 - Outside the arena is darker and quieter; inside keeps the subtle dotted game surface.
 - The boundary uses a thin cyan/white energy rim with static corner accents and scanline/tick details.
+- The first themed border pass uses eight sprite assets from `public/assets/sprites/border`: four corners and four edge pieces.
+- Pixi repeats roughly 5-7 top/bottom edge pieces and 4-5 side edge pieces based on arena size.
+- Border sprites live on a dedicated camera-following Pixi layer, so the visuals stay aligned to the world arena while the camera pans beyond the map edge.
 - Arena background and border textures are generated once on resize and reused by Pixi.
 - Dragging outside the playable bounds clamps the destination to the nearest valid point.
 - Out-of-bounds destination feedback turns amber and shows a small blocked-boundary ring at the valid point.
@@ -219,6 +230,7 @@ Use the AI difficulty selector in the HUD:
 - Visible enemies show subtle non-directional intent cues: hunter pressure rings, spreader pressure aura pulses, tank blocking rings, retreat/recover rings, and warning rings before enemy pulses fire.
 - Enemy cores are hidden unless inside player vision/combat range or temporarily revealed by shockwave.
 - Enemy destination/target lines are no longer drawn in the arena, so enemy intent does not leak through offscreen or hidden path lines.
+- Enemy-origin pulse rings and enemy pulse ripples are hidden unless the originating enemy core is currently visible.
 
 ### Fog Removal
 
@@ -233,10 +245,11 @@ Use the AI difficulty selector in the HUD:
 - The arena is intentionally simplified for performance and readability.
 - Walls, gates, viscosity zones, and energy wells are disabled in this base-capture version.
 - Main bases are the win/loss objectives.
-- Mini-bases replace most of the old territory-control importance and act as supplied healing stations.
-- Supplied mini-bases pulse gently and show connection lines back through the supply network.
+- Mini-bases replace most of the old territory-control importance and act as owned healing stations.
+- Mini-bases no longer require supply-chain connections to heal.
+- Captured mini-bases add +10 max health to the owning team, and recapturing removes that bonus from the previous owner.
 - Relay/mini-bases use a small chain/ring motif.
-- Isolated bases are visually dimmer and flicker to show that they need connection.
+- Neutral or enemy-owned bases are visually dimmer until captured.
 
 ### Active Ability
 
@@ -288,6 +301,48 @@ Pixi containers are kept simple and ordered for future upgrades:
 - `coreLayer`
 - `effectLayer`
 - `debugLayer`
+
+### Asset Pipeline
+
+- Public assets now live under `public/assets`.
+- The starter folder layout is:
+  - `public/assets/sprites/cores`
+  - `public/assets/sprites/bases`
+  - `public/assets/sprites/border`
+  - `public/assets/sprites/ui`
+  - `public/assets/audio/sfx`
+  - `public/assets/audio/music`
+- Empty sprite/audio folders are preserved with `.gitkeep` placeholders until final assets are added.
+- The first generated UI icon sheet was cut into transparent PNG assets in `public/assets/sprites/ui`.
+- The first arena border sheet has been split into named PNG pieces in `public/assets/sprites/border`.
+- Current border assets include:
+  - `border_corner_bl.png`
+  - `border_corner_br.png`
+  - `border_corner_tl.png`
+  - `border_corner_tr.png`
+  - `border_edge_bottom.png`
+  - `border_edge_left.png`
+  - `border_edge_right.png`
+  - `border_edge_top.png`
+- Current UI cutouts include:
+  - `icon-home.png`
+  - `icon-objectives-log.png`
+  - `icon-scan-pulse-status.png`
+  - `icon-enemy-target.png`
+  - `icon-base-regen.png`
+  - `icon-health.png`
+  - `icon-difficulty-level.png`
+  - `icon-reset.png`
+  - `icon-pause.png`
+  - `icon-wave.png`
+  - `icon-shield.png`
+  - `icon-bot.png`
+  - `icon-menu.png`
+  - `icon-upgrade-clash.png`
+  - `icon-upgrade-speed.png`
+  - `icon-upgrade-medic.png`
+- The cutouts are raster PNGs, not true vector SVGs. They are usable now in React/Pixi UI, while final production icons can later be redrawn or traced as clean SVGs.
+- Icons are loaded from `/assets/sprites/ui/...` through a small React `AssetIcon` helper in `GameCanvas.tsx`.
 
 ### Rendering And Performance
 

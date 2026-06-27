@@ -5,11 +5,9 @@ import {
   ArrowUp,
   Bot,
   Bug,
-  ChevronsRight,
   ChevronLeft,
   Flag,
   Home,
-  Map,
   Pause,
   Pin,
   Play,
@@ -97,6 +95,7 @@ type DesktopStatPillProps = {
 
 type DockButtonProps = {
   active?: boolean;
+  assetIcon?: string;
   countdown?: string;
   disabled: boolean;
   icon: LucideIcon;
@@ -104,6 +103,35 @@ type DockButtonProps = {
   onClick: () => void;
   tooltip: string;
 };
+
+const uiIcons = {
+  baseRegen: "/assets/sprites/ui/icon-base-regen.png",
+  bot: "/assets/sprites/ui/icon-bot.png",
+  difficulty: "/assets/sprites/ui/icon-difficulty-level.png",
+  enemyTarget: "/assets/sprites/ui/icon-enemy-target.png",
+  health: "/assets/sprites/ui/icon-health.png",
+  home: "/assets/sprites/ui/icon-home.png",
+  menu: "/assets/sprites/ui/icon-menu.png",
+  objectives: "/assets/sprites/ui/icon-objectives-log.png",
+  pause: "/assets/sprites/ui/icon-pause.png",
+  reset: "/assets/sprites/ui/icon-reset.png",
+  scan: "/assets/sprites/ui/icon-scan-pulse-status.png",
+  shield: "/assets/sprites/ui/icon-shield.png",
+  upgradeClash: "/assets/sprites/ui/icon-upgrade-clash.png",
+  upgradeMedic: "/assets/sprites/ui/icon-upgrade-medic.png",
+  upgradeSpeed: "/assets/sprites/ui/icon-upgrade-speed.png",
+  wave: "/assets/sprites/ui/icon-wave.png",
+};
+
+function AssetIcon({ className = "size-5", src }: { className?: string; src: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={`inline-block bg-contain bg-center bg-no-repeat ${className}`}
+      style={{ backgroundImage: `url(${src})` }}
+    />
+  );
+}
 
 function formatTime(seconds: number) {
   const minutes = Math.floor(seconds / 60)
@@ -185,7 +213,7 @@ function MobileStat({ ariaLabel, icon: Icon, label, tone, value }: MobileStatPro
   );
 }
 
-function DockButton({ active = false, countdown, disabled, icon: Icon, label, onClick, tooltip }: DockButtonProps) {
+function DockButton({ active = false, assetIcon, countdown, disabled, icon: Icon, label, onClick, tooltip }: DockButtonProps) {
   return (
     <button
       aria-label={tooltip}
@@ -202,7 +230,11 @@ function DockButton({ active = false, countdown, disabled, icon: Icon, label, on
           {countdown}
         </span>
       ) : null}
-      <Icon className={`size-5 ${active ? "text-[#8ad8ff]" : "text-[#4fc3ff]"}`} strokeWidth={2.2} />
+      {assetIcon ? (
+        <AssetIcon className={`size-7 ${active ? "opacity-100" : "opacity-90"}`} src={assetIcon} />
+      ) : (
+        <Icon className={`size-5 ${active ? "text-[#8ad8ff]" : "text-[#4fc3ff]"}`} strokeWidth={2.2} />
+      )}
       <span className="text-xs font-semibold">{label}</span>
     </button>
   );
@@ -540,7 +572,12 @@ export default function GameCanvas() {
           </div>
           <div className="grid grid-cols-3 gap-2">
             {stats.upgradeChoices.map((choice) => {
-              const UpgradeIcon = choice.id === "speed" ? ChevronsRight : choice.id === "shield" ? Shield : Sparkles;
+              const upgradeAssetIcon =
+                choice.id === "speed"
+                  ? uiIcons.upgradeSpeed
+                  : choice.id === "shield"
+                    ? uiIcons.shield
+                    : uiIcons.upgradeClash;
 
               return (
                 <button
@@ -550,7 +587,7 @@ export default function GameCanvas() {
                   type="button"
                 >
                   <span className="grid size-9 shrink-0 place-items-center rounded-[12px] border border-[#57c8ff]/26 bg-[#071827] text-[#57c8ff] shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] sm:size-11">
-                    <UpgradeIcon className="size-4.5 sm:size-5" strokeWidth={2.25} />
+                    <AssetIcon className="size-7 sm:size-8" src={upgradeAssetIcon} />
                   </span>
                   <span className="min-w-0">
                     <span className="block truncate text-xs font-bold text-white sm:text-base">{choice.label}</span>
@@ -574,7 +611,7 @@ export default function GameCanvas() {
             title="Home"
             type="button"
           >
-            <Home className="size-4.5" strokeWidth={2} />
+            <AssetIcon className="size-6" src={uiIcons.home} />
           </button>
           <button
             aria-label="Open level select"
@@ -583,13 +620,13 @@ export default function GameCanvas() {
             title="Levels"
             type="button"
           >
-            <Map className="size-4.5" strokeWidth={2} />
+            <AssetIcon className="size-6" src={uiIcons.difficulty} />
           </button>
         </div>
 
         <div className="flex h-11 min-w-[220px] flex-1 items-center gap-2 rounded-[13px] border border-white/12 bg-white/[0.055] px-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.1)] backdrop-blur-2xl sm:min-w-[360px]">
           <span className="grid size-7 shrink-0 place-items-center rounded-full bg-white/8 text-white/80 ring-1 ring-white/10">
-            <Activity className="size-3.5" strokeWidth={1.9} />
+            <AssetIcon className="size-5" src={uiIcons.enemyTarget} />
           </span>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-3">
@@ -606,7 +643,7 @@ export default function GameCanvas() {
         </div>
 
         <div className="hidden h-11 shrink-0 items-center gap-2 rounded-[13px] border border-white/12 bg-white/[0.055] px-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.1)] backdrop-blur-2xl md:flex">
-          <Shield className="size-4 text-[#dcd3ff]" strokeWidth={2} />
+          <AssetIcon className="size-7" src={uiIcons.baseRegen} />
           <div className="leading-tight">
             <div className={`text-[10px] font-semibold uppercase tracking-[0.08em] ${recoveryTone}`}>
               {recoveryCountdown ? `${recoveryLabel} ${recoveryCountdown}` : recoveryLabel}
@@ -617,16 +654,19 @@ export default function GameCanvas() {
           </div>
         </div>
 
-        <select
-          aria-label="AI difficulty"
-          className="h-11 shrink-0 rounded-[13px] border border-white/12 bg-white/[0.055] px-2 text-[10px] font-semibold uppercase text-white outline-none shadow-[inset_0_1px_0_rgba(255,255,255,0.1)] backdrop-blur-2xl transition focus:border-[#57c8ff]/60 focus:ring-2 focus:ring-[#57c8ff]/25 sm:px-3 sm:text-[11px]"
-          onChange={(event) => changeDifficulty(event.target.value as AIDifficulty)}
-          value={stats.aiDifficulty}
-        >
-          <option value="easy" className="text-slate-900">Easy</option>
-          <option value="medium" className="text-slate-900">Medium</option>
-          <option value="hard" className="text-slate-900">Hard</option>
-        </select>
+        <div className="flex h-11 shrink-0 items-center gap-1.5 rounded-[13px] border border-white/12 bg-white/[0.055] px-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.1)] backdrop-blur-2xl">
+          <AssetIcon className="size-6" src={uiIcons.difficulty} />
+          <select
+            aria-label="AI difficulty"
+            className="h-full bg-transparent text-[10px] font-semibold uppercase text-white outline-none transition focus:text-[#8ad8ff] sm:text-[11px]"
+            onChange={(event) => changeDifficulty(event.target.value as AIDifficulty)}
+            value={stats.aiDifficulty}
+          >
+            <option value="easy" className="text-slate-900">Easy</option>
+            <option value="medium" className="text-slate-900">Medium</option>
+            <option value="hard" className="text-slate-900">Hard</option>
+          </select>
+        </div>
 
         <button
           aria-label="Reset game"
@@ -634,7 +674,7 @@ export default function GameCanvas() {
           onClick={resetGame}
           type="button"
         >
-          <RotateCcw className="size-4" strokeWidth={2} />
+          <AssetIcon className="size-6" src={uiIcons.reset} />
           <span className="hidden sm:inline">Reset</span>
         </button>
 
@@ -646,16 +686,18 @@ export default function GameCanvas() {
           title={stats.paused ? "Resume" : "Pause"}
           type="button"
         >
-          <PauseIcon className="size-5" strokeWidth={2.2} />
+          <AssetIcon className="size-7" src={uiIcons.pause} />
         </button>
       </div>
 
-      <div className="pointer-events-none absolute left-3 top-[88px] z-20 rounded-[8px] border border-[#57c8ff]/24 bg-[linear-gradient(180deg,rgba(7,18,30,0.82),rgba(3,10,18,0.7))] px-6 py-4 text-[11px] font-black uppercase tracking-[0.14em] text-[#b9efff] shadow-[0_14px_44px_rgba(0,8,18,0.32),inset_0_1px_0_rgba(255,255,255,0.1)] backdrop-blur-xl sm:left-4 sm:text-xs">
+      <div className="pointer-events-none absolute left-3 top-[88px] z-20 flex items-center gap-2 rounded-[8px] border border-[#57c8ff]/24 bg-[linear-gradient(180deg,rgba(7,18,30,0.82),rgba(3,10,18,0.7))] px-6 py-4 text-[11px] font-black uppercase tracking-[0.14em] text-[#b9efff] shadow-[0_14px_44px_rgba(0,8,18,0.32),inset_0_1px_0_rgba(255,255,255,0.1)] backdrop-blur-xl sm:left-4 sm:text-xs">
+        <AssetIcon className="size-6" src={uiIcons.objectives} />
         Main objective - capture enemy base!
       </div>
 
       {stats.playerRespawnTimer > 0 && (
         <div className="pointer-events-none absolute bottom-28 left-1/2 z-20 flex -translate-x-1/2 w-[175px] items-center gap-2 rounded-[8px]  px-4 py-2 text-[#9dffd0] shadow-[0_16px_54px_rgba(29,255,160,0.14),inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-xl">
+          <AssetIcon className="size-7" src={uiIcons.health} />
           <span className="pb-1 text-[11px] font-black uppercase tracking-[0.14em]">Respawning in</span>
           <span className="animate-pulse text-3xl font-black leading-none text-[#72ff8c] drop-shadow-[0_0_16px_rgba(114,255,174,0.42)]">
             {respawnCountdown}
@@ -666,6 +708,7 @@ export default function GameCanvas() {
       <div className="pointer-events-auto absolute bottom-4 left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-[22px] border border-white/14 bg-[linear-gradient(180deg,rgba(11,26,38,0.76),rgba(6,17,27,0.68))] p-2 text-white shadow-[0_22px_80px_rgba(0,6,14,0.42),inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-2xl">
         <DockButton
           active={stats.shockwaveReady}
+          assetIcon={uiIcons.wave}
           countdown={stats.shockwaveReady ? undefined : `${Math.round(stats.shockwaveCharge)}`}
           disabled={!stats.shockwaveReady || stats.paused || stats.status !== "playing"}
           icon={Zap}
@@ -675,6 +718,7 @@ export default function GameCanvas() {
         />
         <DockButton
           active={stats.shieldActive || stats.shieldReady}
+          assetIcon={uiIcons.shield}
           countdown={stats.shieldActive ? `${Math.ceil(stats.shieldTimer)}` : !stats.shieldReady && stats.level >= 3 ? `${Math.ceil(stats.shieldCooldownRemaining)}` : undefined}
           disabled={!stats.shieldReady || stats.paused || stats.status !== "playing"}
           icon={Shield}
@@ -684,6 +728,7 @@ export default function GameCanvas() {
         />
         <DockButton
           active={stats.botReady}
+          assetIcon={uiIcons.bot}
           countdown={stats.botReady ? `${stats.friendlyBotCount}` : `${Math.ceil(stats.botCooldownRemaining)}`}
           disabled={!stats.botReady || stats.paused || stats.status !== "playing"}
           icon={Bot}

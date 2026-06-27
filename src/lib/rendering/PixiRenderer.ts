@@ -1,4 +1,4 @@
-import { Application, Graphics, Sprite, Text, Texture, TilingSprite } from "pixi.js";
+import { Application, Assets, Container, Graphics, Sprite, Text, Texture, TilingSprite } from "pixi.js";
 import {
   FOG_EXPLORED_OPACITY,
   FOG_SCALE,
@@ -89,11 +89,42 @@ function pulseScale(time: number, phase: number, amount = 0.08, speed = 1) {
   return 1 + Math.sin(time * speed + phase) * amount;
 }
 
+type BorderTextureKey =
+  | "cornerBl"
+  | "cornerBr"
+  | "cornerTl"
+  | "cornerTr"
+  | "edgeBottom"
+  | "edgeLeft"
+  | "edgeRight"
+  | "edgeTop";
+
+const BORDER_TEXTURE_PATHS: Record<BorderTextureKey, string> = {
+  cornerBl: "/assets/sprites/border/border_corner_bl.png",
+  cornerBr: "/assets/sprites/border/border_corner_br.png",
+  cornerTl: "/assets/sprites/border/border_corner_tl.png",
+  cornerTr: "/assets/sprites/border/border_corner_tr.png",
+  edgeBottom: "/assets/sprites/border/border_edge_bottom.png",
+  edgeLeft: "/assets/sprites/border/border_edge_left.png",
+  edgeRight: "/assets/sprites/border/border_edge_right.png",
+  edgeTop: "/assets/sprites/border/border_edge_top.png",
+};
+
+const BORDER_EDGE_MIN_SIZE = 300;
+const BORDER_EDGE_MAX_SIZE = 344;
+const BORDER_EDGE_SPACING_RATIO = 0.86;
+const BORDER_EDGE_CORNER_INSET_RATIO = 0.76;
+const BORDER_EDGE_CENTER_TRIM_RATIO = 0.2;
+
 export class PixiRenderer {
   app: Application | null = null;
 
   private layers: PixiLayers | null = null;
   private textures: PixiTextures | null = null;
+  private borderLayer = new Container({ label: "borderLayer" });
+  private borderTextures: Record<BorderTextureKey, Texture> | null = null;
+  private borderSprites: Sprite[] = [];
+  private borderKey = "";
   private backgroundTexture: Texture | null = null;
   private gridTexture: Texture | null = null;
   private vignetteTexture: Texture | null = null;
@@ -194,7 +225,9 @@ export class PixiRenderer {
     this.height = height;
     this.dpr = dpr;
     this.textures = createPixiTextures();
+    this.borderTextures = await this.loadBorderTextures();
     this.layers = createPixiLayers(app.stage);
+    app.stage.addChild(this.borderLayer);
     this.layers.backgroundLayer.addChild(this.backgroundGraphics);
     this.layers.territoryLayer.addChild(this.arenaFrameGraphics, this.frontlineGraphics);
     this.layers.modifierLayer.addChild(this.baseGraphics, this.modifierGraphics, this.destinationGraphics);
@@ -313,6 +346,8 @@ export class PixiRenderer {
     this.camera = { scale: zoom, x, y };
     this.layers.arenaLayer.scale.set(zoom);
     this.layers.arenaLayer.position.set(x, y);
+    this.borderLayer.scale.set(zoom);
+    this.borderLayer.position.set(x, y);
   }
 
   destroy() {
@@ -329,11 +364,14 @@ export class PixiRenderer {
     this.coreLevelTexts.clear();
     this.healTextPool = [];
     this.activeHealTexts = [];
+    this.clearBorderSprites();
 
     if (this.textures) {
       destroyPixiTextures(this.textures);
       this.textures = null;
     }
+
+    this.borderTextures = null;
 
     this.hazeTexture?.destroy(true);
     this.hazeTexture = null;
@@ -495,6 +533,8 @@ export class PixiRenderer {
       this.gridSprite.tilePosition.set(state.time * -1.8, state.time * 0.8);
     }
 
+    this.drawArenaBorderSprites(state);
+
     this.arenaFrameGraphics.clear();
     drawArenaPath(this.arenaFrameGraphics, arena);
     this.arenaFrameGraphics.fill({ color: 0x061724, alpha: 0.72 });
@@ -537,6 +577,124 @@ export class PixiRenderer {
       this.arenaFrameGraphics.moveTo(arena.right - 2, y1).lineTo(arena.right - 2, y2);
     }
     this.arenaFrameGraphics.stroke({ color: 0x77e4ff, alpha, width: 2.4 });
+  }
+
+  private async loadBorderTextures() {
+    const entries = await Promise.all(
+      Object.entries(BORDER_TEXTURE_PATHS).map(async ([key, path]) => [key, await Assets.load<Texture>(path)] as const),
+    );
+
+    return Object.fromEntries(entries) as Record<BorderTextureKey, Texture>;
+  }
+
+  private ensureBorderTextures() {
+    if (this.borderTextures) {
+      return this.borderTextures;
+    }
+
+    return null;
+  }
+
+  private clearBorderSprites() {
+    for (const sprite of this.borderSprites) {
+      sprite.destroy();
+    }
+
+    this.borderSprites = [];
+    this.borderLayer.removeChildren();
+    this.borderKey = "";
+  }
+
+  private addBorderSprite(texture: Texture, x: number, y: number, size: number, anchorX: number, anchorY: number) {
+    const sprite = new Sprite(texture);
+    sprite.anchor.set(anchorX, anchorY);
+    sprite.position.set(x, y);
+    sprite.width = size;
+    sprite.height = size;
+    sprite.alpha = 0.96;
+    this.borderLayer.addChild(sprite);
+    this.borderSprites.push(sprite);
+  }
+
+  private addHorizontalBorderRun(texture: Texture, startX: number, endX: number, y: number, size: number) {
+    const runLength = endX - startX;
+
+    if (runLength <= 0) {
+      return;
+    }
+
+    const spacing = size * BORDER_EDGE_SPACING_RATIO;
+    const count = runLength <= spacing ? 1 : Math.ceil(runLength / spacing) + 1;
+
+    for (let index = 0; index < count; index += 1) {
+      const t = count === 1 ? 0.5 : index / (count - 1);
+      this.addBorderSprite(texture, startX + runLength * t, y, size, 0.5, 0.5);
+    }
+  }
+
+  private addVerticalBorderRun(texture: Texture, x: number, startY: number, endY: number, size: number) {
+    const runLength = endY - startY;
+
+    if (runLength <= 0) {
+      return;
+    }
+
+    const spacing = size * BORDER_EDGE_SPACING_RATIO;
+    const count = runLength <= spacing ? 1 : Math.ceil(runLength / spacing) + 1;
+
+    for (let index = 0; index < count; index += 1) {
+      const t = count === 1 ? 0.5 : index / (count - 1);
+      this.addBorderSprite(texture, x, startY + runLength * t, size, 0.5, 0.5);
+    }
+  }
+
+  private drawArenaBorderSprites(state: GameRenderState) {
+    const arena = state.arena;
+    const textures = this.ensureBorderTextures();
+
+    if (!textures) {
+      return;
+    }
+
+    const edgeSize = clamp(arena.width * 0.2, BORDER_EDGE_MIN_SIZE, BORDER_EDGE_MAX_SIZE);
+    const sideSize = clamp(arena.height * 0.34, BORDER_EDGE_MIN_SIZE, BORDER_EDGE_MAX_SIZE);
+    const cornerSize = clamp(Math.max(edgeSize, sideSize) * 1.03, 332, 360);
+    const horizontalInset = cornerSize * BORDER_EDGE_CORNER_INSET_RATIO + edgeSize * BORDER_EDGE_CENTER_TRIM_RATIO;
+    const verticalInset = cornerSize * BORDER_EDGE_CORNER_INSET_RATIO + sideSize * BORDER_EDGE_CENTER_TRIM_RATIO;
+    const key = [
+      Math.round(arena.x),
+      Math.round(arena.y),
+      Math.round(arena.width),
+      Math.round(arena.height),
+      Math.round(edgeSize),
+      Math.round(sideSize),
+      Math.round(cornerSize),
+      Math.round(horizontalInset),
+      Math.round(verticalInset),
+    ].join(":");
+
+    if (key === this.borderKey && this.borderSprites.length > 0) {
+      return;
+    }
+
+    this.clearBorderSprites();
+    this.borderKey = key;
+
+    const horizontalStart = arena.x + horizontalInset;
+    const horizontalEnd = arena.right - horizontalInset;
+    const verticalStart = arena.y + verticalInset;
+    const verticalEnd = arena.bottom - verticalInset;
+
+    this.addHorizontalBorderRun(textures.edgeTop, horizontalStart, horizontalEnd, arena.y + 2, edgeSize);
+    this.addHorizontalBorderRun(textures.edgeBottom, horizontalStart, horizontalEnd, arena.bottom - 2, edgeSize);
+    this.addVerticalBorderRun(textures.edgeLeft, arena.x + 2, verticalStart, verticalEnd, sideSize);
+    this.addVerticalBorderRun(textures.edgeRight, arena.right - 2, verticalStart, verticalEnd, sideSize);
+
+    const cornerOffset = cornerSize * 0.16;
+    this.addBorderSprite(textures.cornerTl, arena.x - cornerOffset, arena.y - cornerOffset, cornerSize, 0, 0);
+    this.addBorderSprite(textures.cornerTr, arena.right + cornerOffset, arena.y - cornerOffset, cornerSize, 1, 0);
+    this.addBorderSprite(textures.cornerBl, arena.x - cornerOffset, arena.bottom + cornerOffset, cornerSize, 0, 1);
+    this.addBorderSprite(textures.cornerBr, arena.right + cornerOffset, arena.bottom + cornerOffset, cornerSize, 1, 1);
   }
 
   private ensureBackgroundTextures(state: GameRenderState) {
