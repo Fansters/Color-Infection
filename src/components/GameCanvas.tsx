@@ -19,7 +19,7 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { PixiGameCanvas } from "@/components/PixiGameCanvas";
 import { Game, type AIDifficulty, type GameDebugStats, type GameStats } from "@/lib/game/Game";
 
@@ -43,10 +43,10 @@ const initialStats: GameStats = {
   playerLevel: 1,
   playerXp: 0,
   playerNextLevelXp: 80,
-  playerHealth: 120,
-  playerMaxHealth: 120,
-  playerShield: 40,
-  playerMaxShield: 40,
+  playerHealth: 100,
+  playerMaxHealth: 100,
+  playerShield: 36,
+  playerMaxShield: 36,
   playerRespawnTimer: 0,
   playerRecoveryState: "noSupply",
   playerRecoveryDelayRemaining: 0,
@@ -101,19 +101,26 @@ type DockButtonProps = {
   icon: LucideIcon;
   label: string;
   onClick: () => void;
+  showTooltip?: boolean;
   tooltip: string;
 };
 
 const uiIcons = {
   baseRegen: "/assets/sprites/ui/icon-base-regen.png",
   bot: "/assets/sprites/ui/icon-bot.png",
+  buttonContainer: "/assets/sprites/ui/button_container.png",
+  candle: "/assets/sprites/ui/icon-candle.png",
   difficulty: "/assets/sprites/ui/icon-difficulty-level.png",
   enemyTarget: "/assets/sprites/ui/icon-enemy-target.png",
   health: "/assets/sprites/ui/icon-health.png",
+  heart: "/assets/sprites/ui/icon-heart.png",
   home: "/assets/sprites/ui/icon-home.png",
   menu: "/assets/sprites/ui/icon-menu.png",
+  navbarTile: "/assets/sprites/ui/navbar-tile.jpg",
   objectives: "/assets/sprites/ui/icon-objectives-log.png",
   pause: "/assets/sprites/ui/icon-pause.png",
+  progressBorder: "/assets/sprites/ui/progress_border.png",
+  question: "/assets/sprites/ui/icon-objectives-log.png",
   reset: "/assets/sprites/ui/icon-reset.png",
   scan: "/assets/sprites/ui/icon-scan-pulse-status.png",
   shield: "/assets/sprites/ui/icon-shield.png",
@@ -130,6 +137,47 @@ function AssetIcon({ className = "size-5", src }: { className?: string; src: str
       className={`inline-block bg-contain bg-center bg-no-repeat ${className}`}
       style={{ backgroundImage: `url(${src})` }}
     />
+  );
+}
+
+function PixelProgressBar({ label, value }: { label: string; value: number }) {
+  const safeValue = Math.max(0, Math.min(100, value));
+
+  return (
+    <div
+      aria-label={`${label} capture ${safeValue}%`}
+      className="relative h-[58px] w-[360px] shrink-0 bg-contain bg-center bg-no-repeat sm:h-[64px] sm:w-[399px] xl:h-[70px] xl:w-[436px]"
+      style={{ aspectRatio: "960 / 154", backgroundImage: `url(${uiIcons.progressBorder})` }}
+    >
+      <div className="absolute left-[9.2%] right-[9.2%] top-[40%] h-[31%] overflow-hidden rounded-[2px] bg-black/55 shadow-[inset_0_0_10px_rgba(0,0,0,0.75)]">
+        <div
+          className="h-full rounded-[3px] bg-[linear-gradient(90deg,#5d1e0d,#963312_42%,#d05e1c_76%,#f08a2a)] shadow-[0_0_16px_rgba(208,94,28,0.42)] transition-[width] duration-300"
+          style={{ width: `${safeValue}%` }}
+        />
+      </div>
+      <div className="pointer-events-none absolute inset-x-[12%] top-[30%] text-center text-[10px] font-black uppercase text-white drop-shadow-[0_2px_0_rgba(0,0,0,0.75)] sm:text-[11px]">
+        <span className="block truncate">
+          {label} <span className="text-[#ffb15a]">{safeValue}%</span>
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function PixelButtonContainer({
+  children,
+}: {
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className="relative z-10 h-[64px] shrink-0 bg-contain bg-center bg-no-repeat md:h-[68px] xl:h-[72px]"
+      style={{ aspectRatio: "941 / 274", backgroundImage: `url(${uiIcons.buttonContainer})` }}
+    >
+      <div className="absolute inset-x-[8.5%] top-[31%] flex h-[38%] items-center justify-between gap-2 px-1">
+        {children}
+      </div>
+    </div>
   );
 }
 
@@ -213,7 +261,17 @@ function MobileStat({ ariaLabel, icon: Icon, label, tone, value }: MobileStatPro
   );
 }
 
-function DockButton({ active = false, assetIcon, countdown, disabled, icon: Icon, label, onClick, tooltip }: DockButtonProps) {
+function DockButton({
+  active = false,
+  assetIcon,
+  countdown,
+  disabled,
+  icon: Icon,
+  label,
+  onClick,
+  showTooltip = true,
+  tooltip,
+}: DockButtonProps) {
   return (
     <button
       aria-label={tooltip}
@@ -222,9 +280,11 @@ function DockButton({ active = false, assetIcon, countdown, disabled, icon: Icon
       onClick={onClick}
       type="button"
     >
-      <span className="pointer-events-none absolute bottom-full left-1/2 mb-2 w-max min-w-[150px] max-w-[240px] -translate-x-1/2 whitespace-normal rounded-[12px] border border-white/14 bg-slate-950/88 px-4 py-2 text-center text-[11px] font-medium leading-4 text-white opacity-0 shadow-lg transition group-hover:-translate-y-0.5 group-hover:opacity-100 group-focus-visible:opacity-100">
-        {tooltip}
-      </span>
+      {showTooltip ? (
+        <span className="pointer-events-none absolute bottom-full left-1/2 mb-2 w-max min-w-[150px] max-w-[240px] -translate-x-1/2 whitespace-normal rounded-[12px] border border-white/14 bg-slate-950/88 px-4 py-2 text-center text-[11px] font-medium leading-4 text-white opacity-0 shadow-lg transition group-hover:-translate-y-0.5 group-hover:opacity-100 group-focus-visible:opacity-100">
+          {tooltip}
+        </span>
+      ) : null}
       {countdown ? (
         <span className="absolute right-1.5 top-1.5 rounded-full bg-white/14 px-1.5 py-0.5 text-[9px] font-semibold text-white/92">
           {countdown}
@@ -251,6 +311,7 @@ export default function GameCanvas() {
   const [debugPinned, setDebugPinned] = useState(false);
   const [debugStats, setDebugStats] = useState<GameDebugStats | null>(null);
   const [arenaZoom, setArenaZoom] = useState(1);
+  const [helpOpen, setHelpOpen] = useState(false);
 
   const syncStats = useCallback(() => {
     const currentGame = gameRef.current;
@@ -328,6 +389,7 @@ export default function GameCanvas() {
     (level: number) => {
       gameRef.current?.setLevel(level);
       gameRef.current?.setPaused(false);
+      setHelpOpen(false);
       setScreen("playing");
       syncStats();
     },
@@ -336,12 +398,14 @@ export default function GameCanvas() {
 
   const openHome = useCallback(() => {
     gameRef.current?.setPaused(true);
+    setHelpOpen(false);
     setScreen("home");
     syncStats();
   }, [syncStats]);
 
   const openLevelSelect = useCallback(() => {
     gameRef.current?.setPaused(true);
+    setHelpOpen(false);
     setScreen("levelSelect");
     syncStats();
   }, [syncStats]);
@@ -394,9 +458,10 @@ export default function GameCanvas() {
   const enemyBaseCapturePercent = Math.round(stats.enemyBaseCapture);
   const pauseLabel = stats.paused ? "Resume game" : "Pause game";
   const PauseIcon = stats.paused ? Play : Pause;
-  const shockwaveLabel = stats.shockwaveReady
-    ? "Shockwave ready"
-    : `Shockwave ${Math.round(stats.shockwaveCharge)} percent charged`;
+  const showFirstLevelTips = stats.level === 1;
+  const scanLabel = stats.shockwaveReady
+    ? "Scan ready"
+    : `Scan ${Math.round(stats.shockwaveCharge)} percent charged`;
   const shieldLabel =
     stats.level < 3
       ? "Shield unlocks at level 3"
@@ -414,17 +479,6 @@ export default function GameCanvas() {
     Number.isFinite(stats.playerNextLevelXp) && stats.playerLevel < 10
       ? `${stats.playerXp}/${stats.playerNextLevelXp}`
       : "MAX";
-  const recoveryLabel = formatRecoveryState(stats.playerRecoveryState);
-  const recoveryCountdown =
-    stats.playerRecoveryState === "recoveryDelay" && stats.playerRecoveryDelayRemaining > 0
-      ? `${stats.playerRecoveryDelayRemaining.toFixed(1)}s`
-      : null;
-  const recoveryTone =
-    stats.playerRecoveryState === "combat"
-      ? "text-[#ff7b5f]"
-      : stats.playerRecoveryState === "regenBase" || stats.playerRecoveryState === "regenOwnTerritory"
-        ? "text-[#8ff7d1]"
-        : "text-white/62";
   const respawnCountdown = Math.ceil(stats.playerRespawnTimer);
 
   return (
@@ -517,6 +571,19 @@ export default function GameCanvas() {
                       Six arenas introduce the current mechanics gradually. Pick a level, then capture the enemy main base.
                     </p>
                   </div>
+                  <label className="grid gap-2 text-[10px] font-black uppercase tracking-[0.16em] text-white/52">
+                    Difficulty
+                    <select
+                      aria-label="AI difficulty"
+                      className="h-11 min-w-[160px] rounded-[14px] border border-white/14 bg-white/[0.08] px-3 text-xs font-black uppercase text-white outline-none backdrop-blur-xl transition focus:border-[#57c8ff]/60 focus:ring-2 focus:ring-[#57c8ff]/25"
+                      onChange={(event) => changeDifficulty(event.target.value as AIDifficulty)}
+                      value={stats.aiDifficulty}
+                    >
+                      <option value="easy" className="text-slate-900">Easy AI</option>
+                      <option value="medium" className="text-slate-900">Medium AI</option>
+                      <option value="hard" className="text-slate-900">Hard AI</option>
+                    </select>
+                  </label>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   {levelOptions.map((level) => (
@@ -545,7 +612,7 @@ export default function GameCanvas() {
         </div>
       )}
 
-      {stats.hint && (
+      {showFirstLevelTips && stats.hint && (
         <div className="pointer-events-auto absolute left-1/2 top-16 z-30 flex w-[min(92vw,520px)] -translate-x-1/2 items-center gap-3 rounded-[16px] border border-white/14 bg-[linear-gradient(180deg,rgba(22,33,50,0.78),rgba(12,20,34,0.68))] px-4 py-2 text-sm font-medium text-white/86 shadow-[0_18px_48px_rgba(2,8,18,0.28)] backdrop-blur-2xl">
           <span className="min-w-0 flex-1 text-center">{stats.hint}</span>
           <button
@@ -602,102 +669,111 @@ export default function GameCanvas() {
         </div>
       )}
 
-      <div className="pointer-events-auto absolute inset-x-0 top-0 z-20 flex h-20 items-center gap-2 overflow-x-auto border-b border-white/10 bg-[linear-gradient(180deg,rgba(5,14,22,0.96),rgba(8,19,29,0.78))] px-2 text-white shadow-[0_18px_54px_rgba(0,4,10,0.42)] backdrop-blur-2xl [scrollbar-width:none] sm:px-3">
-        <div className="flex h-11 shrink-0 items-center gap-1 rounded-[13px] border border-white/12 bg-white/[0.055] px-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.1)] backdrop-blur-2xl">
+      <div
+        className="pointer-events-auto absolute inset-x-0 top-0 z-20 flex h-20 items-center gap-2 overflow-x-auto border-b border-white/10 px-2 pr-14 text-white shadow-[0_18px_54px_rgba(0,4,10,0.42)] backdrop-blur-2xl [scrollbar-width:none] sm:px-3 sm:pr-16"
+        style={{
+          backgroundImage: `url(${uiIcons.navbarTile}), linear-gradient(180deg,rgba(5,14,22,0.96),rgba(8,19,29,0.78))`,
+          backgroundPosition: "left top, center",
+          backgroundRepeat: "repeat, no-repeat",
+          backgroundSize: "auto, cover",
+        }}
+      >
+        <PixelButtonContainer>
           <button
             aria-label="Return to home screen"
-            className="grid size-9 place-items-center rounded-[10px] text-white/72 transition hover:bg-white/10 hover:text-white focus:outline-none focus:ring-2 focus:ring-[#57c8ff]/45"
+            className="grid size-8 shrink-0 place-items-center text-white transition hover:scale-110 focus:outline-none focus:ring-2 focus:ring-[#57c8ff]/55"
             onClick={openHome}
             title="Home"
             type="button"
           >
             <AssetIcon className="size-6" src={uiIcons.home} />
           </button>
+
           <button
             aria-label="Open level select"
-            className="grid size-9 place-items-center rounded-[10px] text-white/72 transition hover:bg-white/10 hover:text-white focus:outline-none focus:ring-2 focus:ring-[#57c8ff]/45"
+            className="grid size-8 shrink-0 place-items-center text-white transition hover:scale-110 focus:outline-none focus:ring-2 focus:ring-[#57c8ff]/55"
             onClick={openLevelSelect}
             title="Levels"
             type="button"
           >
-            <AssetIcon className="size-6" src={uiIcons.difficulty} />
+            <AssetIcon className="size-6" src={uiIcons.candle} />
           </button>
-        </div>
 
-        <div className="flex h-11 min-w-[220px] flex-1 items-center gap-2 rounded-[13px] border border-white/12 bg-white/[0.055] px-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.1)] backdrop-blur-2xl sm:min-w-[360px]">
-          <span className="grid size-7 shrink-0 place-items-center rounded-full bg-white/8 text-white/80 ring-1 ring-white/10">
-            <AssetIcon className="size-5" src={uiIcons.enemyTarget} />
-          </span>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-3">
-              <span className="hidden whitespace-nowrap text-sm font-semibold text-white/92 sm:inline">Enemy base</span>
-              <div className="h-2 min-w-[120px] flex-1 overflow-hidden rounded-full bg-white/12">
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-[#57c8ff] to-[#8ff7d1] transition-[width] duration-300"
-                  style={{ width: `${enemyBaseCapturePercent}%` }}
-                />
-              </div>
-              <span className="w-10 text-right text-base font-semibold text-[#57c8ff]">{enemyBaseCapturePercent}%</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="hidden h-11 shrink-0 items-center gap-2 rounded-[13px] border border-white/12 bg-white/[0.055] px-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.1)] backdrop-blur-2xl md:flex">
-          <AssetIcon className="size-7" src={uiIcons.baseRegen} />
-          <div className="leading-tight">
-            <div className={`text-[10px] font-semibold uppercase tracking-[0.08em] ${recoveryTone}`}>
-              {recoveryCountdown ? `${recoveryLabel} ${recoveryCountdown}` : recoveryLabel}
-            </div>
-            <div className="text-[10px] font-medium text-white/46">
-              H+{stats.playerHealthRegenPerSec.toFixed(0)} S+{stats.playerShieldRegenPerSec.toFixed(0)}
-            </div>
-          </div>
-        </div>
-
-        <div className="flex h-11 shrink-0 items-center gap-1.5 rounded-[13px] border border-white/12 bg-white/[0.055] px-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.1)] backdrop-blur-2xl">
-          <AssetIcon className="size-6" src={uiIcons.difficulty} />
-          <select
-            aria-label="AI difficulty"
-            className="h-full bg-transparent text-[10px] font-semibold uppercase text-white outline-none transition focus:text-[#8ad8ff] sm:text-[11px]"
-            onChange={(event) => changeDifficulty(event.target.value as AIDifficulty)}
-            value={stats.aiDifficulty}
+          <button
+            aria-label="Reset game"
+            className="grid size-8 shrink-0 place-items-center text-white transition hover:scale-110 focus:outline-none focus:ring-2 focus:ring-[#57c8ff]/55"
+            onClick={resetGame}
+            title="Reset"
+            type="button"
           >
-            <option value="easy" className="text-slate-900">Easy</option>
-            <option value="medium" className="text-slate-900">Medium</option>
-            <option value="hard" className="text-slate-900">Hard</option>
-          </select>
+            <AssetIcon className="size-6" src={uiIcons.reset} />
+          </button>
+
+          <button
+            aria-label={pauseLabel}
+            aria-pressed={stats.paused}
+            className="grid size-8 shrink-0 place-items-center text-white transition hover:scale-110 focus:outline-none focus:ring-2 focus:ring-[#57c8ff]/55"
+            onClick={togglePause}
+            title={stats.paused ? "Resume" : "Pause"}
+            type="button"
+          >
+            <AssetIcon className="size-7" src={uiIcons.pause} />
+          </button>
+        </PixelButtonContainer>
+
+        <div className="pointer-events-none absolute left-1/2 top-1/2 z-0 -translate-x-1/2 -translate-y-1/2">
+          <PixelProgressBar label="Enemy base" value={enemyBaseCapturePercent} />
         </div>
 
-        <button
-          aria-label="Reset game"
-          className="inline-flex h-11 shrink-0 items-center gap-2 rounded-[13px] border border-white/12 bg-white/[0.055] px-3 text-xs font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.1)] backdrop-blur-2xl transition hover:bg-white/12 focus:outline-none focus:ring-2 focus:ring-[#57c8ff]/45"
-          onClick={resetGame}
-          type="button"
-        >
-          <AssetIcon className="size-6" src={uiIcons.reset} />
-          <span className="hidden sm:inline">Reset</span>
-        </button>
-
-        <button
-          aria-label={pauseLabel}
-          aria-pressed={stats.paused}
-          className="grid h-11 w-11 shrink-0 place-items-center rounded-[13px] border border-white/12 bg-white/[0.055] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.1)] backdrop-blur-2xl transition hover:bg-white/12 focus:outline-none focus:ring-2 focus:ring-[#57c8ff]/45"
-          onClick={togglePause}
-          title={stats.paused ? "Resume" : "Pause"}
-          type="button"
-        >
-          <AssetIcon className="size-7" src={uiIcons.pause} />
-        </button>
+        {showFirstLevelTips ? (
+          <button
+            aria-expanded={helpOpen}
+            aria-label="Open help"
+            className="absolute right-3 top-1/2 z-10 grid size-10 -translate-y-1/2 place-items-center text-white transition hover:scale-110 focus:outline-none focus:ring-2 focus:ring-[#ff9c38]/55"
+            onClick={() => setHelpOpen((open) => !open)}
+            title="Help"
+            type="button"
+          >
+            <AssetIcon className="size-7" src={uiIcons.question} />
+          </button>
+        ) : null}
       </div>
 
-      <div className="pointer-events-none absolute left-3 top-[88px] z-20 flex items-center gap-2 rounded-[8px] border border-[#57c8ff]/24 bg-[linear-gradient(180deg,rgba(7,18,30,0.82),rgba(3,10,18,0.7))] px-6 py-4 text-[11px] font-black uppercase tracking-[0.14em] text-[#b9efff] shadow-[0_14px_44px_rgba(0,8,18,0.32),inset_0_1px_0_rgba(255,255,255,0.1)] backdrop-blur-xl sm:left-4 sm:text-xs">
-        <AssetIcon className="size-6" src={uiIcons.objectives} />
-        Main objective - capture enemy base!
-      </div>
+      {showFirstLevelTips && helpOpen ? (
+        <div className="pointer-events-auto absolute right-3 top-[88px] z-30 w-[min(92vw,340px)] rounded-[10px] border border-[#ff9c38]/30 bg-[linear-gradient(180deg,rgba(24,14,10,0.94),rgba(7,13,20,0.92))] p-4 text-sm leading-5 text-[#ffe1b8] shadow-[0_18px_56px_rgba(0,4,10,0.48),inset_0_1px_0_rgba(255,255,255,0.1)] backdrop-blur-2xl">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-[13px] font-black uppercase text-[#ffb15a]">
+              <AssetIcon className="size-6" src={uiIcons.question} />
+              How to play
+            </div>
+            <button
+              aria-label="Close help"
+              className="grid size-7 place-items-center rounded-full text-white/58 transition hover:bg-white/10 hover:text-white focus:outline-none focus:ring-2 focus:ring-[#ff9c38]/45"
+              onClick={() => setHelpOpen(false)}
+              type="button"
+            >
+              <X className="size-3.5" strokeWidth={2.2} />
+            </button>
+          </div>
+          <ul className="grid gap-2 text-white/82">
+            <li>Move your core to capture mini-bases and connect the supply chain.</li>
+            <li>Stay near supplied bases to recover health and shield after fights.</li>
+            <li>Use Scan to reveal danger, push enemies, and break pressure windows.</li>
+            <li>Capture the enemy base before the arena timer runs out.</li>
+          </ul>
+        </div>
+      ) : null}
+
+      {showFirstLevelTips ? (
+        <div className="pointer-events-none absolute left-3 top-[88px] z-20 flex items-center gap-2 rounded-[8px] border border-[#57c8ff]/24 bg-[linear-gradient(180deg,rgba(7,18,30,0.82),rgba(3,10,18,0.7))] px-6 py-4 text-[11px] font-black uppercase tracking-[0.14em] text-[#b9efff] shadow-[0_14px_44px_rgba(0,8,18,0.32),inset_0_1px_0_rgba(255,255,255,0.1)] backdrop-blur-xl sm:left-4 sm:text-xs">
+          <AssetIcon className="size-6" src={uiIcons.objectives} />
+          Main objective - capture enemy base!
+        </div>
+      ) : null}
 
       {stats.playerRespawnTimer > 0 && (
         <div className="pointer-events-none absolute bottom-28 left-1/2 z-20 flex -translate-x-1/2 w-[175px] items-center gap-2 rounded-[8px]  px-4 py-2 text-[#9dffd0] shadow-[0_16px_54px_rgba(29,255,160,0.14),inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-xl">
-          <AssetIcon className="size-7" src={uiIcons.health} />
+          <AssetIcon className="size-7" src={uiIcons.heart} />
           <span className="pb-1 text-[11px] font-black uppercase tracking-[0.14em]">Respawning in</span>
           <span className="animate-pulse text-3xl font-black leading-none text-[#72ff8c] drop-shadow-[0_0_16px_rgba(114,255,174,0.42)]">
             {respawnCountdown}
@@ -708,13 +784,14 @@ export default function GameCanvas() {
       <div className="pointer-events-auto absolute bottom-4 left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-[22px] border border-white/14 bg-[linear-gradient(180deg,rgba(11,26,38,0.76),rgba(6,17,27,0.68))] p-2 text-white shadow-[0_22px_80px_rgba(0,6,14,0.42),inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-2xl">
         <DockButton
           active={stats.shockwaveReady}
-          assetIcon={uiIcons.wave}
+          assetIcon={uiIcons.scan}
           countdown={stats.shockwaveReady ? undefined : `${Math.round(stats.shockwaveCharge)}`}
           disabled={!stats.shockwaveReady || stats.paused || stats.status !== "playing"}
           icon={Zap}
-          label="Wave"
+          label="Scan"
           onClick={activateShockwave}
-          tooltip={stats.shockwaveReady ? "Wave: reveal and push enemies" : shockwaveLabel}
+          showTooltip={showFirstLevelTips}
+          tooltip={stats.shockwaveReady ? "Scan: reveal and push enemies" : scanLabel}
         />
         <DockButton
           active={stats.shieldActive || stats.shieldReady}
@@ -724,7 +801,8 @@ export default function GameCanvas() {
           icon={Shield}
           label="Shield"
           onClick={activateShield}
-          tooltip={stats.shieldActive ? "Shield: 50% clash damage reduction" : shieldLabel}
+          showTooltip={showFirstLevelTips}
+          tooltip={stats.shieldActive ? "Shield: 50% attack damage reduction" : shieldLabel}
         />
         <DockButton
           active={stats.botReady}
@@ -734,6 +812,7 @@ export default function GameCanvas() {
           icon={Bot}
           label="Bot"
           onClick={spawnFriendlyBot}
+          showTooltip={showFirstLevelTips}
           tooltip={botLabel}
         />
       </div>
@@ -849,7 +928,7 @@ export default function GameCanvas() {
             {formatTime(stats.remainingSeconds)}
           </div>
           <button
-            aria-label={shockwaveLabel}
+            aria-label={scanLabel}
             className="grid size-9 place-items-center rounded-full bg-[#eafaff] text-[#0ea5d7] transition hover:bg-[#d8f5ff] focus:outline-none focus:ring-2 focus:ring-[#1eaee9]/50 disabled:cursor-not-allowed disabled:opacity-45"
             disabled={!stats.shockwaveReady || stats.paused || stats.status !== "playing"}
             onClick={activateShockwave}
@@ -898,9 +977,9 @@ export default function GameCanvas() {
               countdown={stats.shockwaveReady ? "1" : undefined}
               disabled={!stats.shockwaveReady || stats.paused || stats.status !== "playing"}
               icon={Zap}
-              label={stats.shockwaveReady ? "Wave" : `${Math.round(stats.shockwaveCharge)}%`}
+              label={stats.shockwaveReady ? "Scan" : `${Math.round(stats.shockwaveCharge)}%`}
               onClick={activateShockwave}
-              tooltip={stats.shockwaveReady ? "Wave: push enemies and break clashes" : shockwaveLabel}
+              tooltip={stats.shockwaveReady ? "Scan: push enemies and interrupt attacks" : scanLabel}
             />
             <DockButton
               active={stats.shieldActive || stats.shieldReady}
@@ -909,7 +988,7 @@ export default function GameCanvas() {
               icon={Shield}
               label={stats.shieldActive ? `${Math.ceil(stats.shieldTimer)}s` : stats.shieldReady ? "Shield" : `${Math.ceil(stats.shieldCooldownRemaining)}s`}
               onClick={activateShield}
-              tooltip={stats.shieldActive ? "Shield: 50% clash damage reduction" : shieldLabel}
+              tooltip={stats.shieldActive ? "Shield: 50% attack damage reduction" : shieldLabel}
             />
             <DockButton
               active={stats.botReady}
@@ -922,17 +1001,6 @@ export default function GameCanvas() {
           </div>
         </div>
       </div>
-
-      <select
-        aria-label="AI difficulty"
-        className="hidden"
-        onChange={(event) => changeDifficulty(event.target.value as AIDifficulty)}
-        value={stats.aiDifficulty}
-      >
-        <option value="easy">Easy AI</option>
-        <option value="medium">Medium AI</option>
-        <option value="hard">Hard AI</option>
-      </select>
 
       <button
         aria-label="Reset game"

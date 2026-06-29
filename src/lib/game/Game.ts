@@ -12,7 +12,7 @@ export type RippleColor = AgentKind | "shock" | "collision" | "node";
 export type PulseKind = "shockwave" | "node" | "enemy";
 export type BlockerKind = "wall" | "gate";
 export type AIDifficulty = "easy" | "medium" | "hard";
-export type CombatState = "idle" | "contact" | "clash" | "overpower" | "break";
+export type CombatState = "idle" | "approaching" | "inRange" | "windup" | "hit" | "cooldown" | "retreating";
 export type ParticleKind = AgentKind | "clashPlayer" | "clashEnemy" | "clashEven";
 export type RecoveryState = "combat" | "recoveryDelay" | "regenOwnTerritory" | "regenBase" | "noSupply";
 export type TerritorySupply = "own" | "enemy" | "neutral" | "base" | "miniBase";
@@ -105,6 +105,12 @@ export type Agent = {
 	mass: number;
 	spreadPower: number;
 	power: number;
+	attackDamage: number;
+	attackInterval: number;
+	attackWindup: number;
+	attackCooldownRemaining: number;
+	attackWindupTimer: number;
+	attackTargetId: number | null;
 	intensity: number;
 	health: number;
 	maxHealth: number;
@@ -738,11 +744,17 @@ function createPlayer(): Agent {
 		mass: 1.1,
 		spreadPower: 1,
 		power: 20,
+		attackDamage: 15,
+		attackInterval: 0.75,
+		attackWindup: 0.18,
+		attackCooldownRemaining: 0,
+		attackWindupTimer: 0,
+		attackTargetId: null,
 		intensity: 1,
 		health: 100,
 		maxHealth: 100,
-		shield: 20,
-		maxShield: 20,
+		shield: 36,
+		maxShield: 36,
 		level: 1,
 		xp: 0,
 		influenceRadius: 42,
@@ -824,6 +836,12 @@ function createEnemy(type: EnemyType, id: number, config: LevelConfig): Agent {
 		mass: settings.mass,
 		spreadPower: settings.spreadPower,
 		power: 20,
+		attackDamage: getBaseAttackDamage(type),
+		attackInterval: getBaseAttackInterval(type),
+		attackWindup: getBaseAttackWindup(type),
+		attackCooldownRemaining: randomRange(0, 0.28),
+		attackWindupTimer: 0,
+		attackTargetId: null,
 		intensity: 0.96,
 		health: 100,
 		maxHealth: 100,
@@ -892,6 +910,60 @@ function getEnemyRole(type: EnemyType): BotRole {
 	}
 }
 
+function getBaseAttackDamage(type: AgentType) {
+	switch (type) {
+		case "spreader":
+			return 10;
+		case "hunter":
+			return 11;
+		case "tank":
+			return 19;
+		case "splitter":
+			return 13;
+		case "root":
+			return 12;
+		case "player":
+		default:
+			return 15;
+	}
+}
+
+function getBaseAttackInterval(type: AgentType) {
+	switch (type) {
+		case "spreader":
+			return 0.95;
+		case "hunter":
+			return 0.56;
+		case "tank":
+			return 1.08;
+		case "splitter":
+			return 0.72;
+		case "root":
+			return 0.98;
+		case "player":
+		default:
+			return 0.75;
+	}
+}
+
+function getBaseAttackWindup(type: AgentType) {
+	switch (type) {
+		case "hunter":
+			return 0.14;
+		case "tank":
+			return 0.25;
+		case "spreader":
+			return 0.22;
+		case "root":
+			return 0.24;
+		case "splitter":
+			return 0.18;
+		case "player":
+		default:
+			return 0.18;
+	}
+}
+
 function createFriendlyBot(id: number, player: Agent): Agent {
 	const bot = createPlayer();
 	bot.id = -100 - id;
@@ -911,6 +983,12 @@ function createFriendlyBot(id: number, player: Agent): Agent {
 	bot.moveSpeed = bot.speed;
 	bot.mass = 0.46;
 	bot.power = 7;
+	bot.attackDamage = 7;
+	bot.attackInterval = 0.9;
+	bot.attackWindup = 0.16;
+	bot.attackCooldownRemaining = randomRange(0, 0.2);
+	bot.attackWindupTimer = 0;
+	bot.attackTargetId = null;
 	bot.health = 34;
 	bot.maxHealth = 34;
 	bot.shield = 8;
@@ -1399,7 +1477,7 @@ export class Game {
 			this.updateGates(safeDt);
 			this.updateAgents(safeDt);
 			this.resolveCoreCollisions(safeDt);
-			this.damageEnemiesNearPlayer(safeDt);
+			this.updateMeleeCombat(safeDt);
 			this.updateFields();
 			this.updateNodes(safeDt);
 			this.updateEnemyPulses(safeDt);
@@ -1883,9 +1961,12 @@ export class Game {
 			agent.visionRadius = agent.baseVisionRadius * (1 + 0.035 * levelOffset);
 			agent.fieldRadius = agent.influenceRadius;
 			agent.maxHealth = 100 + levelOffset * 16 + this.getMiniBaseHealthBonus(agent.kind);
-			agent.maxShield = 20 + levelOffset * 3.5;
+			agent.maxShield = 36 + levelOffset * 3.5;
 			agent.mass = 1.1 + levelOffset * 0.18;
 			agent.power = 20 + levelOffset * 3.5;
+			agent.attackDamage = getBaseAttackDamage("player") + levelOffset * 1.5;
+			agent.attackInterval = Math.max(0.58, getBaseAttackInterval("player") - levelOffset * 0.012);
+			agent.attackWindup = getBaseAttackWindup("player");
 			agent.spreadPower = 1 + levelOffset * 0.08;
 			agent.speed = agent.moveSpeed;
 		} else {
@@ -1898,10 +1979,16 @@ export class Game {
 			agent.influenceRadius = agent.baseInfluenceRadius * (1 + 0.05 * levelOffset);
 			agent.visionRadius = agent.baseVisionRadius * (1 + 0.03 * levelOffset);
 			agent.fieldRadius = agent.influenceRadius;
-			agent.maxHealth = 100 + levelOffset * 16 + this.getMiniBaseHealthBonus(agent.kind);
+			agent.maxHealth =
+				(agent.type === "hunter" ? 86 : agent.type === "tank" ? 152 : 100) +
+				levelOffset * (agent.type === "tank" ? 22 : 16) +
+				this.getMiniBaseHealthBonus(agent.kind);
 			agent.maxShield = settings.shield + levelOffset * 3.5;
 			agent.mass = settings.mass * (1 + levelOffset * 0.1);
 			agent.power = 20 + levelOffset * 3.5;
+			agent.attackDamage = getBaseAttackDamage(agent.type as EnemyType) + levelOffset * (agent.type === "tank" ? 2 : 1.4);
+			agent.attackInterval = Math.max(0.48, getBaseAttackInterval(agent.type as EnemyType) - levelOffset * 0.01);
+			agent.attackWindup = getBaseAttackWindup(agent.type as EnemyType);
 			agent.spreadPower = settings.spreadPower * (1 + levelOffset * 0.06);
 			agent.speed = agent.moveSpeed * (agent.type === "tank" ? 0.96 : 1);
 		}
@@ -1928,6 +2015,7 @@ export class Game {
 		player.shield = clamp(player.maxShield * shieldRatio, 0, player.maxShield);
 		player.speed = player.moveSpeed * (1 + this.playerUpgradeBonuses.speed);
 		player.power += this.playerUpgradeBonuses.power;
+		player.attackDamage += this.playerUpgradeBonuses.power;
 		player.combatRadius *= this.playerUpgradeBonuses.radius;
 		player.influenceRadius *= this.playerUpgradeBonuses.radius;
 		player.fieldRadius = player.influenceRadius;
@@ -1939,7 +2027,7 @@ export class Game {
 
 		if (this.pendingUpgradeChoices.length === 0) {
 			this.pendingUpgradeChoices = [
-				{ id: "power", label: "Clash Power", description: "+7 core combat power" },
+				{ id: "power", label: "Attack Power", description: "+7 melee attack damage" },
 				{ id: "shield", label: "Shield Cell", description: "+12 max shield" },
 				{ id: "speed", label: "Drive", description: "+0.05 move speed" },
 			];
@@ -2222,13 +2310,8 @@ export class Game {
 		this.player.shieldFlashTimer = Math.max(0, this.player.shieldFlashTimer - dt);
 		this.player.healthPulseTimer = Math.max(0, this.player.healthPulseTimer - dt);
 		this.player.effectTickTimer = Math.max(0, this.player.effectTickTimer - dt);
-		this.player.contactTimer = Math.max(0, this.player.contactTimer - dt * 0.9);
-
-		if (this.player.breakTimer > 0) {
-			this.player.combatState = "break";
-		} else if (this.player.contactTimer <= 0.02) {
-			this.player.combatState = "idle";
-		}
+		this.player.contactTimer = 0;
+		this.updateAttackTimers(this.player, dt);
 
 		if (this.player.invulnerableTimer > 0) {
 			this.player.invulnerableTimer = Math.max(0, this.player.invulnerableTimer - dt);
@@ -2251,13 +2334,8 @@ export class Game {
 			enemy.shieldFlashTimer = Math.max(0, enemy.shieldFlashTimer - dt);
 			enemy.healthPulseTimer = Math.max(0, enemy.healthPulseTimer - dt);
 			enemy.effectTickTimer = Math.max(0, enemy.effectTickTimer - dt);
-			enemy.contactTimer = Math.max(0, enemy.contactTimer - dt * 0.9);
-
-			if (enemy.breakTimer > 0) {
-				enemy.combatState = "break";
-			} else if (enemy.contactTimer <= 0.02) {
-				enemy.combatState = "idle";
-			}
+			enemy.contactTimer = 0;
+			this.updateAttackTimers(enemy, dt);
 
 			if (enemy.invulnerableTimer > 0) {
 				enemy.invulnerableTimer = Math.max(0, enemy.invulnerableTimer - dt);
@@ -2288,13 +2366,8 @@ export class Game {
 			bot.shieldFlashTimer = Math.max(0, bot.shieldFlashTimer - dt);
 			bot.healthPulseTimer = Math.max(0, bot.healthPulseTimer - dt);
 			bot.effectTickTimer = Math.max(0, bot.effectTickTimer - dt);
-			bot.contactTimer = Math.max(0, bot.contactTimer - dt * 0.9);
-
-			if (bot.breakTimer > 0) {
-				bot.combatState = "break";
-			} else if (bot.contactTimer <= 0.02) {
-				bot.combatState = "idle";
-			}
+			bot.contactTimer = 0;
+			this.updateAttackTimers(bot, dt);
 
 			if (bot.invulnerableTimer > 0) {
 				bot.invulnerableTimer = Math.max(0, bot.invulnerableTimer - dt);
@@ -2304,6 +2377,19 @@ export class Game {
 		}
 
 		this.friendlyBots = this.friendlyBots.filter((bot) => bot.active || bot.isRespawning);
+	}
+
+	private updateAttackTimers(agent: Agent, dt: number) {
+		agent.attackCooldownRemaining = Math.max(0, agent.attackCooldownRemaining - dt);
+
+		if (agent.breakTimer > 0) {
+			this.interruptAttack(agent, "retreating", 0.18);
+			return;
+		}
+
+		if (agent.combatState === "hit" && agent.attackCooldownRemaining > 0) {
+			agent.combatState = "cooldown";
+		}
 	}
 
 	private updateBases(dt: number) {
@@ -2834,6 +2920,10 @@ export class Game {
 			terrainModifier *= 0.48;
 		}
 
+		if (this.shouldSlowForMelee(agent)) {
+			terrainModifier *= agent.kind === "player" && !agent.isMinion ? 0.45 : 0.32;
+		}
+
 		const dx = agent.targetX - agent.x;
 		const dy = agent.targetY - agent.y;
 		const targetDistance = Math.hypot(dx, dy);
@@ -2869,6 +2959,32 @@ export class Game {
 			this.addParticle(next.x, next.y, agent.kind, 0.7);
 		}
 		this.resolveAgentBlockers(agent);
+	}
+
+	private shouldSlowForMelee(agent: Agent) {
+		if (
+			agent.combatState !== "inRange" &&
+			agent.combatState !== "windup" &&
+			agent.combatState !== "hit" &&
+			agent.combatState !== "cooldown"
+		) {
+			return false;
+		}
+
+		const target = this.findAgentById(agent.attackTargetId);
+		return !!target && this.isInAttackRange(agent, target);
+	}
+
+	private findAgentById(id: number | null) {
+		if (id === null) {
+			return null;
+		}
+
+		if (this.player.id === id) {
+			return this.player;
+		}
+
+		return this.enemies.find((enemy) => enemy.id === id) ?? this.friendlyBots.find((bot) => bot.id === id) ?? null;
 	}
 
 	private steerAroundBlockers(agent: Agent, dirX: number, dirY: number, targetDistance: number) {
@@ -3356,11 +3472,7 @@ export class Game {
 			}
 		}
 
-		for (const bot of this.friendlyBots) {
-			if (bot.active && !bot.isRespawning && !this.player.isRespawning) {
-				this.resolveAgentPairCollision(this.player, bot, false, dt);
-			}
-		}
+		// Friendly mini-robots phase through the player; enemy collisions above still block both sides.
 	}
 
 	private resolveAgentPairCollision(a: Agent, b: Agent, isPlayerEnemy: boolean, dt: number) {
@@ -3408,88 +3520,6 @@ export class Game {
 		}
 
 		void dt;
-	}
-
-	private getCombatDamagePerSecond(agent: Agent, opponent: Agent) {
-		const sample = this.sampleInfluence(agent.x, agent.y, agent.influenceRadius * 0.9);
-		const ownTerritory = agent.kind === "player" ? sample.player : sample.infection;
-		const enemyTerritory = agent.kind === "player" ? sample.infection : sample.player;
-		const territoryBonus = ownTerritory > 0.45 ? 1.15 : enemyTerritory > 0.45 ? 0.85 : 1;
-		const nodeCount = this.nodes.filter((node) => node.owner === agent.kind).length;
-		const nodeBonus = 1 + nodeCount * 0.035;
-		const shieldBonus = agent.shield > agent.maxShield * 0.45 ? 1.08 : 1;
-		const healthPressure = opponent.health < opponent.maxHealth * 0.35 ? 1.08 : 1;
-		return agent.power * territoryBonus * nodeBonus * shieldBonus * healthPressure;
-	}
-
-	private updateCombatState(agent: Agent, opponent: Agent, contactTime: number, overpowering: boolean) {
-		agent.contactTimer = Math.max(agent.contactTimer, contactTime);
-
-		if (agent.breakTimer > 0) {
-			agent.combatState = "break";
-			return;
-		}
-
-		if (overpowering && contactTime >= 0.5) {
-			agent.combatState = "overpower";
-			return;
-		}
-
-		agent.combatState = contactTime >= 0.5 ? "clash" : "contact";
-
-		if (contactTime >= 0.5 && overpowering && opponent.canMove) {
-			const dx = opponent.x - agent.x;
-			const dy = opponent.y - agent.y;
-			const length = Math.max(0.001, Math.hypot(dx, dy));
-			const push = 8;
-			const target = this.clampToArena(
-				opponent.x + (dx / length) * push,
-				opponent.y + (dy / length) * push,
-				opponent.collisionRadius + 8,
-			);
-			opponent.x = target.x;
-			opponent.y = target.y;
-		}
-	}
-
-	private emitCombatEffects(
-		player: Agent,
-		enemy: Agent,
-		midpointX: number,
-		midpointY: number,
-		sustained: boolean,
-		playerDamage: number,
-		enemyDamage: number,
-	) {
-		const cadence = sustained ? 0.1 : 0.18;
-
-		if (player.effectTickTimer > 0 && enemy.effectTickTimer > 0) {
-			return;
-		}
-
-		player.effectTickTimer = cadence;
-		enemy.effectTickTimer = cadence;
-		const advantageKind: ParticleKind =
-			playerDamage > enemyDamage * 1.12
-				? "clashPlayer"
-				: enemyDamage > playerDamage * 1.12
-					? "clashEnemy"
-					: "clashEven";
-		this.addRipple(midpointX, midpointY, "collision", sustained ? 34 : 24);
-		this.addParticle(
-			midpointX + randomRange(-7, 7),
-			midpointY + randomRange(-7, 7),
-			advantageKind,
-			sustained ? 1.05 : 0.76,
-		);
-
-		if (sustained) {
-			this.addParticle(midpointX + randomRange(-8, 8), midpointY + randomRange(-8, 8), advantageKind, 0.82);
-		}
-
-		if (sustained) {
-			this.addContestedZone(midpointX, midpointY, 54);
-		}
 	}
 
 	private resolveAgentBlockers(agent: Agent) {
@@ -3805,7 +3835,7 @@ export class Game {
 				enemy.lastClashAt = this.time;
 				enemy.combatLockoutTimer = COMBAT_LOCKOUT_SECONDS;
 				enemy.breakTimer = Math.max(enemy.breakTimer, 0.42 + edge * 0.18);
-				enemy.combatState = "break";
+				this.interruptAttack(enemy, "retreating", 0.35 + edge * 0.16);
 				enemy.hitFlashTimer = Math.max(enemy.hitFlashTimer, 0.18);
 				const dx = enemy.x - pulse.x;
 				const dy = enemy.y - pulse.y;
@@ -3865,66 +3895,229 @@ export class Game {
 			}
 		}
 
-		this.damageEnemiesNearPlayer(dt);
 	}
 
-	private damageEnemiesNearPlayer(dt: number) {
-		for (const enemy of this.getActiveEnemies()) {
-			this.resolveCombatDamage(this.player, enemy, dt, 1);
+	private updateMeleeCombat(dt: number) {
+		const enemies = this.getActiveEnemies().filter((enemy) => !enemy.isRespawning);
+		const playerSide = [
+			...(!this.player.isRespawning && this.player.active ? [this.player] : []),
+			...this.friendlyBots.filter((bot) => bot.active && !bot.isRespawning),
+		];
+		const enemyDamageScale = this.getDifficultySettings().clashPressure;
 
-			for (const bot of this.friendlyBots) {
-				if (bot.active && !bot.isRespawning) {
-					this.resolveCombatDamage(bot, enemy, dt, 0.62);
-				}
-			}
+		for (const ally of playerSide) {
+			this.updateMeleeAttack(ally, enemies, dt, ally.isMinion ? 0.82 : 1);
+		}
+
+		for (const enemy of enemies) {
+			this.updateMeleeAttack(enemy, playerSide, dt, enemyDamageScale);
 		}
 	}
 
-	private resolveCombatDamage(playerSide: Agent, enemy: Agent, dt: number, playerDamageScale: number) {
-		const playerDistance = distance(playerSide.x, playerSide.y, enemy.x, enemy.y);
-		const combatRange = playerSide.combatRadius + enemy.combatRadius;
-
-		if (playerDistance > combatRange) {
+	private updateMeleeAttack(attacker: Agent, candidates: Agent[], dt: number, damageScale: number) {
+		if (!attacker.active || attacker.isRespawning || !attacker.canMove) {
+			this.interruptAttack(attacker);
 			return;
 		}
+
+		if (attacker.breakTimer > 0) {
+			this.interruptAttack(attacker, "retreating", 0.24);
+			return;
+		}
+
+		const target = this.selectAttackTarget(attacker, candidates);
+
+		if (!target) {
+			attacker.attackTargetId = null;
+			attacker.attackWindupTimer = 0;
+			attacker.combatState = "idle";
+			return;
+		}
+
+		attacker.attackTargetId = target.id;
+
+		if (!this.isInAttackRange(attacker, target)) {
+			attacker.attackWindupTimer = 0;
+			attacker.combatState = "approaching";
+			return;
+		}
+
+		this.markAttackEngagement(attacker, target);
+
+		if (attacker.attackWindupTimer > 0) {
+			attacker.attackWindupTimer = Math.max(0, attacker.attackWindupTimer - dt);
+			attacker.combatState = "windup";
+			this.emitAttackWindupEffect(attacker);
+
+			if (attacker.attackWindupTimer <= 0) {
+				this.performMeleeHit(attacker, target, damageScale);
+			}
+
+			return;
+		}
+
+		if (attacker.attackCooldownRemaining > 0) {
+			attacker.combatState = "cooldown";
+			return;
+		}
+
+		attacker.attackWindupTimer = Math.max(0.01, attacker.attackWindup);
+		attacker.combatState = "inRange";
+	}
+
+	private selectAttackTarget(attacker: Agent, candidates: Agent[]) {
+		const validCandidates = candidates.filter(
+			(candidate) =>
+				candidate.kind !== attacker.kind &&
+				candidate.active &&
+				!candidate.isRespawning &&
+				candidate.health > 0 &&
+				candidate.invulnerableTimer <= 0,
+		);
+
+		const currentTarget = validCandidates.find((candidate) => candidate.id === attacker.attackTargetId);
 
 		if (
-			playerSide.invulnerableTimer > 0 ||
-			enemy.invulnerableTimer > 0 ||
-			playerSide.isRespawning ||
-			enemy.isRespawning
+			currentTarget &&
+			distance(attacker.x, attacker.y, currentTarget.x, currentTarget.y) <=
+				this.getAttackRange(attacker, currentTarget) + 72
 		) {
+			return currentTarget;
+		}
+
+		let best: Agent | null = null;
+		let bestDistance = Number.POSITIVE_INFINITY;
+
+		for (const candidate of validCandidates) {
+			const candidateDistance = distance(attacker.x, attacker.y, candidate.x, candidate.y);
+			const engageRange = this.getAttackRange(attacker, candidate);
+			const detectionRange =
+				attacker.goalType === "attackPlayer" || attacker.selectedTarget.includes("player")
+					? Math.max(engageRange + 180, attacker.visionRadius + candidate.bodyRadius)
+					: Math.max(engageRange + 72, attacker.visionRadius * 0.75 + candidate.bodyRadius);
+
+			if (candidateDistance > detectionRange || candidateDistance >= bestDistance) {
+				continue;
+			}
+
+			best = candidate;
+			bestDistance = candidateDistance;
+		}
+
+		return best;
+	}
+
+	private getAttackRange(attacker: Agent, target: Agent) {
+		return attacker.combatRadius + target.combatRadius;
+	}
+
+	private isInAttackRange(attacker: Agent, target: Agent) {
+		return distance(attacker.x, attacker.y, target.x, target.y) <= this.getAttackRange(attacker, target);
+	}
+
+	private markAttackEngagement(attacker: Agent, target: Agent) {
+		attacker.lastClashAt = this.time;
+		attacker.combatLockoutTimer = COMBAT_LOCKOUT_SECONDS;
+		attacker.isInCombat = true;
+		target.lastClashAt = this.time;
+		target.combatLockoutTimer = COMBAT_LOCKOUT_SECONDS;
+		target.isInCombat = true;
+	}
+
+	private performMeleeHit(attacker: Agent, target: Agent, damageScale: number) {
+		if (!this.isInAttackRange(attacker, target) || attacker.breakTimer > 0 || target.breakTimer > 0) {
+			attacker.combatState = "approaching";
 			return;
 		}
 
-		const bodyRange = playerSide.bodyRadius + enemy.bodyRadius;
-		const falloffDistance = Math.max(1, combatRange - bodyRange);
-		const engagement =
-			playerDistance <= bodyRange ? 1 : clamp(1 - (playerDistance - bodyRange) / falloffDistance, 0.35, 1);
-		const playerDamage = this.getCombatDamagePerSecond(playerSide, enemy) * engagement * playerDamageScale;
-		const enemyDamage =
-			this.getCombatDamagePerSecond(enemy, playerSide) * this.getDifficultySettings().clashPressure * engagement;
-		const contactTime = Math.min(Math.max(playerSide.contactTimer, enemy.contactTimer) + dt, 1.6);
-		const sustained = contactTime >= 0.5;
-		const playerOverpowering = playerDamage > enemyDamage * 1.35;
-		const enemyOverpowering = enemyDamage > playerDamage * 1.35;
-		const midpointX = (playerSide.x + enemy.x) / 2;
-		const midpointY = (playerSide.y + enemy.y) / 2;
+		const damage = this.getMeleeAttackDamage(attacker, target) * damageScale;
+		const midpointX = (attacker.x + target.x) / 2;
+		const midpointY = (attacker.y + target.y) / 2;
 
-		playerSide.lastClashAt = this.time;
-		playerSide.combatLockoutTimer = COMBAT_LOCKOUT_SECONDS;
-		enemy.lastClashAt = this.time;
-		enemy.combatLockoutTimer = COMBAT_LOCKOUT_SECONDS;
-		this.updateCombatState(playerSide, enemy, contactTime, playerOverpowering);
-		this.updateCombatState(enemy, playerSide, contactTime, enemyOverpowering);
-		this.emitCombatEffects(playerSide, enemy, midpointX, midpointY, sustained, playerDamage, enemyDamage);
+		attacker.attackCooldownRemaining = Math.max(attacker.attackCooldownRemaining, attacker.attackInterval);
+		attacker.attackWindupTimer = 0;
+		attacker.combatState = "hit";
+		attacker.lastDamageDealtAt = this.time;
+		attacker.combatLockoutTimer = COMBAT_LOCKOUT_SECONDS;
+		attacker.isInCombat = true;
+		this.applyAttackKnockback(attacker, target);
+		this.applyCoreDamage(target, damage, attacker);
+		this.addRipple(midpointX, midpointY, "collision", 28);
+		this.spawnBurst(
+			midpointX,
+			midpointY,
+			attacker.kind === "player" ? "clashPlayer" : "clashEnemy",
+			attacker.type === "tank" ? 6 : 4,
+			attacker.type === "tank" ? 0.72 : 0.52,
+		);
 
-		if (playerSide.breakTimer > 0 || enemy.breakTimer > 0) {
+		if (target.type === "splitter" && !target.splitDone && target.health <= target.maxHealth * 0.55 && target.active) {
+			this.splitEnemy(target);
+		}
+	}
+
+	private getMeleeAttackDamage(attacker: Agent, target: Agent) {
+		const sample = this.sampleInfluence(attacker.x, attacker.y, attacker.influenceRadius * 0.75);
+		const ownTerritory = attacker.kind === "player" ? sample.player : sample.infection;
+		const enemyTerritory = attacker.kind === "player" ? sample.infection : sample.player;
+		const territoryBonus = ownTerritory > 0.45 ? 1.08 : enemyTerritory > 0.45 ? 0.9 : 1;
+		const shieldBonus = attacker.shield > attacker.maxShield * 0.45 ? 1.04 : 1;
+		const pressureBonus = target.health < target.maxHealth * 0.35 ? 1.06 : 1;
+
+		return attacker.attackDamage * territoryBonus * shieldBonus * pressureBonus;
+	}
+
+	private emitAttackWindupEffect(attacker: Agent) {
+		if (attacker.effectTickTimer > 0) {
 			return;
 		}
 
-		this.applyCoreDamage(enemy, playerDamage * dt, playerSide);
-		this.applyCoreDamage(playerSide, enemyDamage * dt, playerSide.isMinion ? undefined : enemy);
+		attacker.effectTickTimer = 0.12;
+		const angle = this.time * 9 + attacker.id;
+		this.addParticle(
+			attacker.x + Math.cos(angle) * (attacker.bodyRadius + 5),
+			attacker.y + Math.sin(angle) * (attacker.bodyRadius + 5),
+			attacker.kind,
+			0.45,
+		);
+	}
+
+	private applyAttackKnockback(attacker: Agent, target: Agent) {
+		const dx = target.x - attacker.x;
+		const dy = target.y - attacker.y;
+		const length = Math.max(0.001, Math.hypot(dx, dy));
+		const nx = dx / length;
+		const ny = dy / length;
+		const baseKnockback = attacker.type === "tank" ? 13 : 8;
+		const targetPush = baseKnockback * clamp(attacker.mass / Math.max(0.2, target.mass), 0.45, 1.9);
+		const attackerRecoil = baseKnockback * 0.22 * clamp(target.mass / Math.max(0.2, attacker.mass), 0.35, 1.45);
+
+		if (target.canMove && target.active && !target.isRespawning) {
+			const nextTarget = this.clampToArena(
+				target.x + nx * targetPush,
+				target.y + ny * targetPush,
+				target.collisionRadius + 8,
+			);
+			target.x = nextTarget.x;
+			target.y = nextTarget.y;
+		}
+
+		if (attacker.canMove && attacker.active && !attacker.isRespawning) {
+			const nextAttacker = this.clampToArena(
+				attacker.x - nx * attackerRecoil,
+				attacker.y - ny * attackerRecoil,
+				attacker.collisionRadius + 8,
+			);
+			attacker.x = nextAttacker.x;
+			attacker.y = nextAttacker.y;
+		}
+	}
+
+	private interruptAttack(agent: Agent, state: CombatState = "idle", cooldown = 0) {
+		agent.attackWindupTimer = 0;
+		agent.attackTargetId = null;
+		agent.attackCooldownRemaining = Math.max(agent.attackCooldownRemaining, cooldown);
+		agent.combatState = state;
 	}
 
 	private damageEnemy(enemy: Agent, amount: number) {
@@ -3946,7 +4139,7 @@ export class Game {
 
 		if (target.shield > 0) {
 			const shieldHit = Math.min(target.shield, remaining);
-			target.shield -= shieldHit;
+			target.shield = clamp(target.shield - shieldHit, 0, target.maxShield);
 			remaining -= shieldHit;
 
 			if (shieldHit > 0) {
@@ -3979,6 +4172,7 @@ export class Game {
 			return;
 		}
 
+		this.interruptAttack(bot);
 		bot.active = false;
 		bot.isRespawning = false;
 		bot.health = 0;
@@ -3994,6 +4188,7 @@ export class Game {
 			return;
 		}
 
+		this.interruptAttack(enemy);
 		enemy.active = false;
 		enemy.isRespawning = true;
 		enemy.respawnTimer = 9;
@@ -4018,6 +4213,7 @@ export class Game {
 			return;
 		}
 
+		this.interruptAttack(this.player);
 		this.playerDeaths += 1;
 		this.player.active = false;
 		this.player.isRespawning = true;
@@ -4036,6 +4232,7 @@ export class Game {
 	}
 
 	private respawnCore(core: Agent) {
+		this.interruptAttack(core);
 		core.active = true;
 		core.isRespawning = false;
 		core.respawnTimer = 0;

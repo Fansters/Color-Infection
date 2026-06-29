@@ -11,6 +11,7 @@ export type PixiLayers = {
   effectLayer: Container;
   debugLayer: Container;
   arenaLayer: Container;
+  actorLayer: Container;
   arenaMask: Graphics;
 };
 
@@ -25,6 +26,7 @@ export function createPixiLayers(stage: Container): PixiLayers {
   const effectLayer = new Container({ label: "effectLayer" });
   const debugLayer = new Container({ label: "debugLayer" });
   const arenaLayer = new Container({ label: "arenaLayer" });
+  const actorLayer = new Container({ label: "actorLayer" });
   const arenaMask = new Graphics({ label: "arenaMask" });
 
   arenaLayer.addChild(
@@ -33,12 +35,15 @@ export function createPixiLayers(stage: Container): PixiLayers {
     dotLayer,
     modifierLayer,
     nodeLayer,
+  );
+  actorLayer.addChild(
     coreLayer,
     effectLayer,
     debugLayer,
   );
   arenaLayer.mask = arenaMask;
-  stage.addChild(backgroundLayer, arenaLayer, arenaMask);
+  actorLayer.mask = arenaMask;
+  stage.addChild(backgroundLayer, arenaLayer, actorLayer, arenaMask);
 
   return {
     backgroundLayer,
@@ -51,6 +56,7 @@ export function createPixiLayers(stage: Container): PixiLayers {
     effectLayer,
     debugLayer,
     arenaLayer,
+    actorLayer,
     arenaMask,
   };
 }

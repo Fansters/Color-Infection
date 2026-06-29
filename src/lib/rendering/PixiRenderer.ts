@@ -99,6 +99,8 @@ type BorderTextureKey =
   | "edgeRight"
   | "edgeTop";
 
+type CoreHudTextureKey = "heart" | "level" | "shield";
+
 const BORDER_TEXTURE_PATHS: Record<BorderTextureKey, string> = {
   cornerBl: "/assets/sprites/border/border_corner_bl.png",
   cornerBr: "/assets/sprites/border/border_corner_br.png",
@@ -110,11 +112,22 @@ const BORDER_TEXTURE_PATHS: Record<BorderTextureKey, string> = {
   edgeTop: "/assets/sprites/border/border_edge_top.png",
 };
 
-const BORDER_EDGE_MIN_SIZE = 300;
-const BORDER_EDGE_MAX_SIZE = 344;
+const ARENA_TILE_TEXTURE_PATH = "/assets/sprites/ui/arena-tile.jpg";
+
+const CORE_HUD_TEXTURE_PATHS: Record<CoreHudTextureKey, string> = {
+  heart: "/assets/sprites/ui/icon-heart.png",
+  level: "/assets/sprites/ui/icon-candle.png",
+  shield: "/assets/sprites/ui/icon-shield.png",
+};
+
+const BORDER_EDGE_MIN_SIZE = 180;
+const BORDER_EDGE_MAX_SIZE = 206;
 const BORDER_EDGE_SPACING_RATIO = 0.86;
-const BORDER_EDGE_CORNER_INSET_RATIO = 0.76;
+const BORDER_EDGE_CORNER_INSET_RATIO = 1.1;
 const BORDER_EDGE_CENTER_TRIM_RATIO = 0.2;
+const BORDER_HORIZONTAL_RUN_OVERLAP_RATIO = 0.16;
+const BORDER_BOTTOM_CORNER_Y_OFFSET = 8;
+const BORDER_LEFT_EDGE_Y_OFFSET = 6;
 
 export class PixiRenderer {
   app: Application | null = null;
@@ -123,6 +136,8 @@ export class PixiRenderer {
   private textures: PixiTextures | null = null;
   private borderLayer = new Container({ label: "borderLayer" });
   private borderTextures: Record<BorderTextureKey, Texture> | null = null;
+  private coreHudTextures: Record<CoreHudTextureKey, Texture> | null = null;
+  private arenaTileTexture: Texture | null = null;
   private borderSprites: Sprite[] = [];
   private borderKey = "";
   private backgroundTexture: Texture | null = null;
@@ -147,6 +162,7 @@ export class PixiRenderer {
   private dotSpriteState = new Map<number, DotSpriteVisualState>();
   private activeDotSpriteCount = 0;
   private coreSprites = new Map<number, Sprite>();
+  private coreHudIconSprites = new Map<string, Sprite>();
   private coreTrails = new Map<number, TrailSample[]>();
   private coreBarState = new Map<number, CoreBarVisualState>();
   private coreLevelTexts = new Map<number, Text>();
@@ -225,9 +241,16 @@ export class PixiRenderer {
     this.height = height;
     this.dpr = dpr;
     this.textures = createPixiTextures();
-    this.borderTextures = await this.loadBorderTextures();
+    const [borderTextures, arenaTileTexture, coreHudTextures] = await Promise.all([
+      this.loadBorderTextures(),
+      Assets.load<Texture>(ARENA_TILE_TEXTURE_PATH),
+      this.loadCoreHudTextures(),
+    ]);
+    this.borderTextures = borderTextures;
+    this.arenaTileTexture = arenaTileTexture;
+    this.coreHudTextures = coreHudTextures;
     this.layers = createPixiLayers(app.stage);
-    app.stage.addChild(this.borderLayer);
+    app.stage.addChildAt(this.borderLayer, 2);
     this.layers.backgroundLayer.addChild(this.backgroundGraphics);
     this.layers.territoryLayer.addChild(this.arenaFrameGraphics, this.frontlineGraphics);
     this.layers.modifierLayer.addChild(this.baseGraphics, this.modifierGraphics, this.destinationGraphics);
@@ -346,6 +369,8 @@ export class PixiRenderer {
     this.camera = { scale: zoom, x, y };
     this.layers.arenaLayer.scale.set(zoom);
     this.layers.arenaLayer.position.set(x, y);
+    this.layers.actorLayer.scale.set(zoom);
+    this.layers.actorLayer.position.set(x, y);
     this.borderLayer.scale.set(zoom);
     this.borderLayer.position.set(x, y);
   }
@@ -358,6 +383,10 @@ export class PixiRenderer {
     this.dotSprites.clear();
     this.dotSpriteState.clear();
     this.activeDotSpriteCount = 0;
+    for (const sprite of this.coreHudIconSprites.values()) {
+      sprite.destroy();
+    }
+    this.coreHudIconSprites.clear();
     this.coreSprites.clear();
     this.coreTrails.clear();
     this.coreBarState.clear();
@@ -372,6 +401,8 @@ export class PixiRenderer {
     }
 
     this.borderTextures = null;
+    this.coreHudTextures = null;
+    this.arenaTileTexture = null;
 
     this.hazeTexture?.destroy(true);
     this.hazeTexture = null;
@@ -446,7 +477,7 @@ export class PixiRenderer {
       const text = new Text({
         text: "",
         style: {
-          fontFamily: "Inter, Arial, sans-serif",
+          fontFamily: "TT Lakes Neue, TT Lakes, Arial, sans-serif",
           fontSize: 13,
           fontWeight: "700",
           fill: 0x4ade80,
@@ -529,7 +560,7 @@ export class PixiRenderer {
     this.backgroundGraphics.clear();
     this.ensureBackgroundTextures(state);
 
-    if (this.gridSprite) {
+    if (this.gridSprite && !this.arenaTileTexture) {
       this.gridSprite.tilePosition.set(state.time * -1.8, state.time * 0.8);
     }
 
@@ -585,6 +616,14 @@ export class PixiRenderer {
     );
 
     return Object.fromEntries(entries) as Record<BorderTextureKey, Texture>;
+  }
+
+  private async loadCoreHudTextures() {
+    const entries = await Promise.all(
+      Object.entries(CORE_HUD_TEXTURE_PATHS).map(async ([key, path]) => [key, await Assets.load<Texture>(path)] as const),
+    );
+
+    return Object.fromEntries(entries) as Record<CoreHudTextureKey, Texture>;
   }
 
   private ensureBorderTextures() {
@@ -658,7 +697,7 @@ export class PixiRenderer {
 
     const edgeSize = clamp(arena.width * 0.2, BORDER_EDGE_MIN_SIZE, BORDER_EDGE_MAX_SIZE);
     const sideSize = clamp(arena.height * 0.34, BORDER_EDGE_MIN_SIZE, BORDER_EDGE_MAX_SIZE);
-    const cornerSize = clamp(Math.max(edgeSize, sideSize) * 1.03, 332, 360);
+    const cornerSize = clamp(Math.max(edgeSize, sideSize) * 1.03, 183, 208);
     const horizontalInset = cornerSize * BORDER_EDGE_CORNER_INSET_RATIO + edgeSize * BORDER_EDGE_CENTER_TRIM_RATIO;
     const verticalInset = cornerSize * BORDER_EDGE_CORNER_INSET_RATIO + sideSize * BORDER_EDGE_CENTER_TRIM_RATIO;
     const key = [
@@ -680,21 +719,28 @@ export class PixiRenderer {
     this.clearBorderSprites();
     this.borderKey = key;
 
-    const horizontalStart = arena.x + horizontalInset;
-    const horizontalEnd = arena.right - horizontalInset;
+    const horizontalOverlap = edgeSize * BORDER_HORIZONTAL_RUN_OVERLAP_RATIO;
+    const horizontalStart = arena.x + horizontalInset - horizontalOverlap;
+    const horizontalEnd = arena.right - horizontalInset + horizontalOverlap;
     const verticalStart = arena.y + verticalInset;
     const verticalEnd = arena.bottom - verticalInset;
 
     this.addHorizontalBorderRun(textures.edgeTop, horizontalStart, horizontalEnd, arena.y + 2, edgeSize);
     this.addHorizontalBorderRun(textures.edgeBottom, horizontalStart, horizontalEnd, arena.bottom - 2, edgeSize);
-    this.addVerticalBorderRun(textures.edgeLeft, arena.x + 2, verticalStart, verticalEnd, sideSize);
-    this.addVerticalBorderRun(textures.edgeRight, arena.right - 2, verticalStart, verticalEnd, sideSize);
+    this.addVerticalBorderRun(
+      textures.edgeLeft,
+      arena.x - 8,
+      verticalStart + BORDER_LEFT_EDGE_Y_OFFSET,
+      verticalEnd + BORDER_LEFT_EDGE_Y_OFFSET,
+      sideSize,
+    );
+    this.addVerticalBorderRun(textures.edgeRight, arena.right + 8, verticalStart, verticalEnd, sideSize);
 
     const cornerOffset = cornerSize * 0.16;
     this.addBorderSprite(textures.cornerTl, arena.x - cornerOffset, arena.y - cornerOffset, cornerSize, 0, 0);
     this.addBorderSprite(textures.cornerTr, arena.right + cornerOffset, arena.y - cornerOffset, cornerSize, 1, 0);
-    this.addBorderSprite(textures.cornerBl, arena.x - cornerOffset, arena.bottom + cornerOffset, cornerSize, 0, 1);
-    this.addBorderSprite(textures.cornerBr, arena.right + cornerOffset, arena.bottom + cornerOffset, cornerSize, 1, 1);
+    this.addBorderSprite(textures.cornerBl, arena.x - cornerOffset, arena.bottom + cornerOffset + BORDER_BOTTOM_CORNER_Y_OFFSET, cornerSize, 0, 1);
+    this.addBorderSprite(textures.cornerBr, arena.right + cornerOffset, arena.bottom + cornerOffset + BORDER_BOTTOM_CORNER_Y_OFFSET, cornerSize, 1, 1);
   }
 
   private ensureBackgroundTextures(state: GameRenderState) {
@@ -720,8 +766,13 @@ export class PixiRenderer {
     this.vignetteTexture = textures.vignette;
 
     this.backgroundSprite = new Sprite(this.backgroundTexture);
-    this.gridSprite = new TilingSprite({ texture: this.gridTexture, width: state.width, height: state.height });
-    this.gridSprite.alpha = 0.68;
+    this.gridSprite = new TilingSprite({
+      texture: this.arenaTileTexture ?? this.gridTexture,
+      width: state.width,
+      height: state.height,
+    });
+    this.gridSprite.alpha = this.arenaTileTexture ? 0.88 : 0.68;
+    this.gridSprite.tileScale.set(1);
     this.vignetteSprite = new Sprite(this.vignetteTexture);
     this.layers.backgroundLayer.addChildAt(this.backgroundSprite, 0);
     this.layers.backgroundLayer.addChildAt(this.gridSprite, 1);
@@ -1120,6 +1171,7 @@ export class PixiRenderer {
     for (const label of this.coreLevelTexts.values()) {
       label.visible = false;
     }
+    this.hideCoreHudIcons();
 
     this.trackPlayerHealing(state.player, state.time);
     this.drawCoreHealthBar(state.player, true);
@@ -1142,6 +1194,41 @@ export class PixiRenderer {
     }
 
     this.updateHealTexts(dt);
+  }
+
+  private hideCoreHudIcons() {
+    for (const sprite of this.coreHudIconSprites.values()) {
+      sprite.visible = false;
+    }
+  }
+
+  private syncCoreHudIcon(
+    agentId: number,
+    role: CoreHudTextureKey,
+    x: number,
+    y: number,
+    size: number,
+    alpha: number,
+  ) {
+    if (!this.layers || !this.coreHudTextures) {
+      return;
+    }
+
+    const id = `${agentId}:${role}`;
+    let sprite = this.coreHudIconSprites.get(id);
+
+    if (!sprite) {
+      sprite = new Sprite(this.coreHudTextures[role]);
+      sprite.anchor.set(0.5);
+      this.layers.coreLayer.addChild(sprite);
+      this.coreHudIconSprites.set(id, sprite);
+    }
+
+    sprite.position.set(x, y);
+    sprite.width = size;
+    sprite.height = size;
+    sprite.alpha = alpha;
+    sprite.visible = true;
   }
 
   private drawCoreTrails(state: GameRenderState) {
@@ -1209,52 +1296,22 @@ export class PixiRenderer {
     this.coreBarState.set(agent.id, { health, shield });
 
     const width = clamp(agent.bodyRadius * 4.25, 64, 94);
-    const iconSize = 9;
-    const x = agent.x - width / 2 + iconSize + 5;
+    const iconSize = clamp(agent.bodyRadius * 0.54, 12, 16);
+    const x = agent.x - width / 2 + iconSize + 6;
     const y = agent.y - agent.bodyRadius - (alwaysVisible ? 38 : 33);
     const healthColor = health > 0.6 ? 0x4ade80 : health > 0.3 ? 0xfbbf24 : 0xff5f5f;
     const shieldAlpha = shield > 0.03 ? 0.86 + agent.shieldFlashTimer * 0.12 : 0.24;
-    const plateX = x - iconSize - 9;
-    const plateWidth = width + iconSize + 14;
+    const iconX = x - iconSize * 0.8;
 
-    this.coreHealthBarGraphics.roundRect(plateX, y - 7, plateWidth, 23, 8).fill({
-      color: 0x030811,
-      alpha: alwaysVisible ? 0.78 : 0.64,
-    });
-    this.coreHealthBarGraphics.roundRect(plateX, y - 7, plateWidth, 23, 8).stroke({
-      color: 0xffffff,
-      alpha: alwaysVisible ? 0.18 : 0.1,
-      width: 1,
-    });
+    this.syncCoreHudIcon(agent.id, "shield", iconX, y + 1, iconSize, shield > 0.03 ? shieldAlpha : 0.42);
+    this.syncCoreHudIcon(agent.id, "heart", iconX, y + 11.5, iconSize, 0.98);
 
-    const shieldIconX = x - iconSize - 3;
-    const shieldIconY = y - 2;
-    this.coreHealthBarGraphics
-      .moveTo(shieldIconX + iconSize * 0.5, shieldIconY - 4)
-      .lineTo(shieldIconX + iconSize, shieldIconY)
-      .lineTo(shieldIconX + iconSize * 0.82, shieldIconY + iconSize * 0.64)
-      .lineTo(shieldIconX + iconSize * 0.5, shieldIconY + iconSize)
-      .lineTo(shieldIconX + iconSize * 0.18, shieldIconY + iconSize * 0.64)
-      .lineTo(shieldIconX, shieldIconY)
-      .closePath()
-      .stroke({ color: 0xe9ddff, alpha: 0.92, width: 1.35 });
-
-    const heartX = x - iconSize - 3;
-    const heartY = y + 8.5;
-    this.coreHealthBarGraphics
-      .moveTo(heartX + iconSize * 0.5, heartY + iconSize * 0.82)
-      .bezierCurveTo(heartX - 1, heartY + iconSize * 0.38, heartX + 1, heartY, heartX + iconSize * 0.36, heartY + 1)
-      .bezierCurveTo(heartX + iconSize * 0.48, heartY + 1, heartX + iconSize * 0.5, heartY + iconSize * 0.18, heartX + iconSize * 0.5, heartY + iconSize * 0.18)
-      .bezierCurveTo(heartX + iconSize * 0.5, heartY + iconSize * 0.18, heartX + iconSize * 0.54, heartY + 1, heartX + iconSize * 0.68, heartY + 1)
-      .bezierCurveTo(heartX + iconSize, heartY, heartX + iconSize + 1, heartY + iconSize * 0.38, heartX + iconSize * 0.5, heartY + iconSize * 0.82)
-      .fill({ color: 0xff5f5f, alpha: 0.96 });
-
-    this.coreHealthBarGraphics.roundRect(x, y - 2, width, 6, 3).fill({ color: 0x142033, alpha: 0.94 });
+    this.coreHealthBarGraphics.roundRect(x, y - 2, width, 6, 2.5).fill({ color: 0x07101b, alpha: 0.78 });
     this.coreHealthBarGraphics.roundRect(x, y - 2, Math.max(1, width * shield), 6, 3).fill({
       color: 0xe9ddff,
       alpha: shieldAlpha,
     });
-    this.coreHealthBarGraphics.roundRect(x, y + 8, width, 7, 3.5).fill({ color: 0x162235, alpha: 0.94 });
+    this.coreHealthBarGraphics.roundRect(x, y + 8, width, 7, 3).fill({ color: 0x07101b, alpha: 0.78 });
     this.coreHealthBarGraphics.roundRect(x, y + 8, Math.max(1, width * health), 7, 3.5).fill({
       color: healthColor,
       alpha: 0.98,
@@ -1273,7 +1330,7 @@ export class PixiRenderer {
       label = new Text({
         text: "",
         style: {
-          fontFamily: "Inter, Arial, sans-serif",
+          fontFamily: "TT Lakes Neue, TT Lakes, Arial, sans-serif",
           fontSize: 10,
           fontWeight: "800",
           fill: 0xffffff,
@@ -1281,13 +1338,15 @@ export class PixiRenderer {
           stroke: { color: 0x050914, width: 3 },
         },
       });
-      label.anchor.set(0.5);
+      label.anchor.set(0, 0.5);
       this.layers.coreLayer.addChild(label);
       this.coreLevelTexts.set(agent.id, label);
     }
 
+    const labelY = agent.y + agent.bodyRadius + (alwaysVisible ? 21 : 18);
+    this.syncCoreHudIcon(agent.id, "level", agent.x - 13, labelY, 11, alwaysVisible ? 0.92 : 0.74);
     label.text = `LV ${agent.level}`;
-    label.position.set(agent.x, agent.y + agent.bodyRadius + (alwaysVisible ? 21 : 18));
+    label.position.set(agent.x - 5, labelY);
     label.alpha = alwaysVisible ? 0.92 : 0.74;
     label.visible = true;
   }
@@ -1301,17 +1360,21 @@ export class PixiRenderer {
     const edge = kind === "player" ? colorToHex(palette.player) : colorToHex(palette.infected);
     const influenceRadius = agent.influenceRadius;
     const combatAlpha =
-      agent.combatState === "clash"
-        ? 0.42
-        : agent.combatState === "overpower"
-          ? 0.52
-          : agent.combatState === "break"
-            ? 0.28
-            : agent.combatState === "contact"
-              ? 0.3
-              : 0.22;
+      agent.combatState === "windup"
+        ? 0.52
+        : agent.combatState === "hit"
+          ? 0.62
+          : agent.combatState === "inRange"
+            ? 0.38
+            : agent.combatState === "cooldown"
+              ? 0.26
+              : agent.combatState === "retreating"
+                ? 0.24
+                : agent.combatState === "approaching"
+                  ? 0.3
+                  : 0.18;
     const combatWidth =
-      agent.combatState === "overpower" ? 3 : agent.combatState === "clash" ? 2.5 : agent.combatState === "contact" ? 2.1 : 1.8;
+      agent.combatState === "hit" ? 3.2 : agent.combatState === "windup" ? 2.7 : agent.combatState === "inRange" ? 2.2 : 1.7;
 
     this.coreAuraGraphics.circle(agent.x, agent.y, influenceRadius).fill({ color: edge, alpha: 0.026 * agent.intensity });
     this.coreAuraGraphics.circle(agent.x, agent.y, influenceRadius).stroke({ color: edge, alpha: 0.11 * agent.intensity, width: 1 });
@@ -1323,7 +1386,7 @@ export class PixiRenderer {
     });
     this.coreAuraGraphics.circle(agent.x, agent.y, agent.combatRadius + 2).stroke({
       color: 0xffffff,
-      alpha: agent.combatState === "idle" ? 0.08 : 0.18,
+      alpha: agent.combatState === "idle" || agent.combatState === "approaching" ? 0.08 : 0.2,
       width: 0.8,
     });
     this.coreAuraGraphics.circle(agent.x, agent.y, agent.bodyRadius + 7).stroke({
